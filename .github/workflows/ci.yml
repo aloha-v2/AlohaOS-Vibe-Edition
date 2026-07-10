@@ -40,3 +40,45 @@ jobs:
             echo "::error title=Kernel build failed::$message"
             exit "$status"
           fi
+
+  qemu-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install QEMU, OVMF and Rust targets
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build ESP
+        run: make esp PROFILE=release
+      - name: Boot for 15 seconds
+        shell: bash
+        run: |
+          OVMF=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' | head -n 1)
+          test -n "$OVMF"
+          set +e
+          timeout 15s qemu-system-x86_64 \
+            -machine q35 \
+            -m 256M \
+            -bios "$OVMF" \
+            -drive "format=raw,file=fat:rw:esp" \
+            -display none \
+            -monitor none \
+            -serial file:serial.log \
+            -net none \
+            -no-reboot
+          status=$?
+          set -e
+          cat serial.log
+          if [ "$status" -ne 124 ]; then
+            echo "::error title=QEMU stopped early::QEMU exited with status $status before the smoke-test timeout"
+            exit 1
+          fi
+          grep -q "interrupts enabled, starting shell" serial.log
+          if grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' serial.log; then
+            echo "::error title=Kernel fault detected::Serial output contains a fatal error"
+            exit 1
+          fi
