@@ -9,13 +9,13 @@
 - Physical allocator, paging, higher-half direct map и reclaiming heap.
 - PIC, PIT 100 Hz, uptime, PS/2 keyboard, VirtIO Block и read-only FAT32.
 - Shell, COM1 logging, task lifecycle и guarded task stacks.
-- CI build и headless QEMU smoke test.
+- Отдельный 20 KiB scheduler/timer IST stack; build и QEMU smoke зелёные.
 
 ## Scheduler status
 
-Полный XSAVE context и round-robin прототип обнаружил Double Fault на реальном Windows/QEMU запуске. Cross-task switch снова безопасно gated off: PIT, shell и lifecycle продолжают работать, но второй task не запускается. Это лучше, чем делать вид, что scheduler готов и оставлять ОС падающей.
+Прототип полного XSAVE context switch обнаружил Double Fault на Windows/QEMU, поэтому cross-task switching безопасно gated off. PIT, shell и lifecycle стабильны. Timer IRQ уже перенесён на отдельный IST stack, что изолирует scheduler path от текущего task stack.
 
-Следующая реализация должна использовать отдельный scheduler interrupt stack, строгий assembly trampoline и аппаратный stress-test до включения по умолчанию.
+Следующий шаг: assembly-only context switch trampoline, затем включение round-robin только после QEMU и аппаратного stress-test.
 
 ## Windows
 
@@ -28,9 +28,10 @@ git reset --hard origin/brain/m0-context-switch
 
 ## Дальше
 
-- Переписать context-switch trampoline без Rust на switch path.
-- Добавить dedicated IST/scheduler stack.
-- Только после этого включить round-robin и часовой stress-test.
+- Assembly-only switch trampoline.
+- Включить round-robin за runtime gate.
+- Часовой stress-test без Double Fault.
+- IRQ-safe synchronization и frame deallocation.
 
 ## Лицензия
 
