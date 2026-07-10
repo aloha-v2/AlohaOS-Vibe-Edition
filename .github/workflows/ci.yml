@@ -25,9 +25,12 @@ jobs:
           rustup target add x86_64-unknown-uefi x86_64-unknown-none
       - run: make esp PROFILE=release
       - name: Boot shell, timer IST and FAT32
+        id: smoke
         shell: bash
         run: |
           OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
+          echo "OVMF=$OVMF"
+          test -n "$OVMF"
           set +e
           timeout 15s qemu-system-x86_64 \
             -machine q35 -cpu max -m 256M \
@@ -35,11 +38,29 @@ jobs:
             -drive "format=raw,file=fat:rw:esp" \
             -drive "if=none,id=aloha-disk,format=raw,file=disk/aloha-fat32.img" \
             -device "virtio-blk-pci,drive=aloha-disk,disable-modern=on" \
-            -display none -monitor none -serial file:serial.log -net none -no-reboot
+            -display none -monitor none -serial file:serial.log -net none -no-reboot \
+            -d guest_errors,cpu_reset -D qemu-debug.log \
+            2>qemu-stderr.log
           status=$?
           set -e
-          cat serial.log
+          echo "QEMU_STATUS=$status"
+          echo "===== serial.log ====="
+          cat serial.log || true
+          echo "===== qemu-stderr.log ====="
+          cat qemu-stderr.log || true
+          echo "===== qemu-debug.log tail ====="
+          tail -n 200 qemu-debug.log || true
           test "$status" -eq 124
           grep -q "interrupts enabled, starting shell" serial.log
           grep -q "storage: virtio_blk=true, fat32=true" serial.log
           ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' serial.log
+      - name: Upload QEMU diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-diagnostics-${{ github.run_id }}
+          path: |
+            serial.log
+            qemu-stderr.log
+            qemu-debug.log
+          if-no-files-found: warn
