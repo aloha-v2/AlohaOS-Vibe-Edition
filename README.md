@@ -11,10 +11,11 @@
 - Legacy VirtIO Block + FAT32: `ls /` и `cat hello.txt` проверены на Windows/QEMU.
 - Shell, COM1 logging, task lifecycle и guarded task stacks.
 - Отдельный 20 KiB scheduler/timer IST stack проверен на Windows/QEMU без Double Fault.
+- Assembly-only trampoline сохраняет CR3, FS/GS и XSAVE state; round-robin пока gated off.
 
 ## Scheduler status
 
-Стабильная база подтверждена: shell, PIT timer, dedicated timer IST и FAT32 работают. Полный XSAVE context-switch прототип остаётся выключенным после обнаруженного Double Fault. Следующий шаг: assembly-only trampoline, затем повторное включение round-robin за runtime gate и stress-test.
+Стабильная база подтверждена: shell, PIT timer, dedicated timer IST и FAT32 работают. Новый low-level trampoline не вызывает Rust между сохранением и восстановлением extended context. Следующий шаг: подключить persistent IST frames, включить round-robin за runtime gate и провести stress-test на Windows/QEMU.
 
 ## Windows
 
@@ -28,7 +29,7 @@ git reset --hard origin/brain/m0-context-switch
 
 ## Дальше
 
-- Assembly-only context switch trampoline.
+- Persistent per-task frames для timer IST.
 - Включить round-robin за runtime gate.
 - Часовой stress-test без Double Fault.
 - IRQ-safe synchronization и frame deallocation.
