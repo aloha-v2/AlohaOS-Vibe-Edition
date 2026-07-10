@@ -26,11 +26,10 @@ jobs:
       - run: make esp PROFILE=release
       - name: Boot shell, timer IST and FAT32
         id: smoke
+        continue-on-error: true
         shell: bash
         run: |
           OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
-          echo "OVMF=$OVMF"
-          test -n "$OVMF"
           set +e
           timeout 15s qemu-system-x86_64 \
             -machine q35 -cpu max -m 256M \
@@ -43,14 +42,20 @@ jobs:
             2>qemu-stderr.log
           status=$?
           set -e
-          echo "QEMU_STATUS=$status"
-          echo "===== serial.log ====="
-          cat serial.log || true
-          echo "===== qemu-stderr.log ====="
-          cat qemu-stderr.log || true
-          echo "===== qemu-debug.log tail ====="
-          tail -n 200 qemu-debug.log || true
-          test "$status" -eq 124
+          echo "$status" > qemu-status.txt
+      - name: Publish QEMU diagnostics
+        if: always()
+        shell: bash
+        run: |
+          status=$(cat qemu-status.txt 2>/dev/null || echo missing)
+          serial=$(tail -n 80 serial.log 2>/dev/null | tr '\n' '|' | cut -c1-4000)
+          stderr=$(tail -n 40 qemu-stderr.log 2>/dev/null | tr '\n' '|' | cut -c1-2000)
+          debug=$(tail -n 40 qemu-debug.log 2>/dev/null | tr '\n' '|' | cut -c1-2000)
+          echo "::notice title=QEMU status::$status"
+          echo "::notice title=QEMU serial::$serial"
+          echo "::notice title=QEMU stderr::$stderr"
+          echo "::notice title=QEMU debug::$debug"
+          test "$status" = 124
           grep -q "interrupts enabled, starting shell" serial.log
           grep -q "storage: virtio_blk=true, fat32=true" serial.log
           ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' serial.log
@@ -63,4 +68,5 @@ jobs:
             serial.log
             qemu-stderr.log
             qemu-debug.log
+            qemu-status.txt
           if-no-files-found: warn
