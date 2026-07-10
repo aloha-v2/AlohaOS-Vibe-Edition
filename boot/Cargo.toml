@@ -1,0 +1,13 @@
+[package]
+name = "alohaboot"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "alohaboot"
+path = "src/main.rs"
+
+[dependencies]
+uefi = { version = "0.28", features = ["alloc", "global_allocator", "logger", "panic_handler"] }
+xmas-elf = "0.9"
+common = { path = "../common" }

@@ -1,4 +1,5 @@
-/target/
-/esp/
-*.fd
-*.log
+/target
+/esp
+**/*.rs.bk
+Cargo.lock
+.DS_Store

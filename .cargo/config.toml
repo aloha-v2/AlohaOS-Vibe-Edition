@@ -1,0 +1,9 @@
+# Kernel-specific link settings for the bare-metal target.
+# rust-lld is the default linker for x86_64-unknown-none.
+# We pin a fixed load address via the linker script and use the static
+# relocation model so the loader does not have to process relocations.
+[target.x86_64-unknown-none]
+rustflags = [
+    "-C", "link-arg=-Tkernel/kernel.ld",
+    "-C", "relocation-model=static",
+]
