@@ -7,17 +7,26 @@
 ## 1. Стабильность ядра
 
 - [ ] Переписать полный x86_64 context switch: GPR, RIP, RSP, RFLAGS, CR3, FS/GS base, FPU/SSE/AVX через XSAVE/XRSTOR.
-- [ ] Реализовать lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
-- [ ] Добавить отдельный kernel stack для каждой задачи и guard page от переполнения.
+- [x] Реализовать lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
+- [x] Добавить отдельный kernel stack для каждой задачи и guard page от переполнения.
 - [ ] Сделать стабильный preemptive round-robin scheduler и stress-test переключений.
 - [ ] Добавить spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
 - [ ] Убрать глобальные `static mut` из горячих подсистем.
 - [ ] Реализовать нормальное освобождение физических фреймов.
-- [ ] Добавить kernel log, serial output в COM1 и уровни log severity.
+- [x] Добавить kernel log, serial output в COM1 и уровни log severity.
 - [ ] Добавить symbol table/backtrace для panic screen.
 - [ ] Создать QEMU smoke tests: boot, exceptions, heap, scheduler, disk, keyboard.
 
 **Готово, когда:** несколько задач работают час без Double Fault, утечек и зависаний.
+
+### Выполнено в рабочей ветке
+
+- COM1 logger работает без heap и пишет этапы boot/panic с severity.
+- Lifecycle хранится атомарно; поддержаны block, wake, timed sleep и exit.
+- PIT переводит Sleeping в Ready при достижении wake tick.
+- Для каждой задачи мапится отдельный 16 KiB kernel stack.
+- Перед каждым стеком оставлена отсутствующая PTE: overflow вызывает page fault вместо порчи соседней памяти.
+- Команда `tasks` показывает состояния и deadline пробуждения.
 
 ## 2. ACPI, APIC и современное железо
 
@@ -166,7 +175,7 @@
 ## Ближайшие задачи
 
 1. Реализовать полный task context и стабильный scheduler без Double Fault.
-2. Перенести shell в Ring 3 через минимальные syscalls.
-3. Построить VFS поверх VirtIO Block и FAT32.
-4. Добавить mouse input и VirtIO GPU.
-5. Только затем начинать compositor и GUI toolkit.
+2. Сделать round-robin stress test.
+3. Перенести shell в Ring 3 через минимальные syscalls.
+4. Построить VFS поверх VirtIO Block и FAT32.
+5. Добавить mouse input и VirtIO GPU.

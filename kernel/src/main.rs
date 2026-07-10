@@ -19,20 +19,28 @@ mod pic;
 mod keyboard;
 mod timer;
 mod scheduler;
+mod task_stacks;
 mod virtio_blk;
 mod fat32;
 mod shell;
+mod serial;
 
 #[no_mangle]
 pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
  unsafe { core::arch::asm!("cli", options(nomem, nostack)) };
+ unsafe { serial::init() };
+ serial::info(format_args!("AlohaOS kernel entry"));
+
  let info = unsafe { &*boot_info };
  framebuffer::init(info.framebuffer);
- framebuffer::clear_console();
+ framebuffer::clear(0x0f, 0x17, 0x2a);
+ serial::debug(format_args!("framebuffer ready: {}x{}", info.framebuffer.width, info.framebuffer.height));
+
  gdt::init();
  interrupts::init();
- unsafe { memory::init(info.memory_map) };
+ serial::debug(format_args!("GDT, TSS and IDT ready"));
 
+ unsafe { memory::init(info.memory_map) };
  let test_frame = memory::allocate_frame()
  .unwrap_or_else(|| fatal("NO USABLE PHYSICAL MEMORY"));
  let paging = match paging::init(info.memory_map) {
@@ -43,6 +51,7 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
  if !paging::verify_direct_map(test_frame) {
  fatal("HIGHER HALF DIRECT MAP TEST FAILED");
  }
+ serial::info(format_args!("physical memory and paging ready"));
 
  heap::init().unwrap_or_else(|| fatal("KERNEL HEAP ALLOCATION FAILED"));
  let boxed = Box::new(1u64);
@@ -52,10 +61,16 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
  drop(title);
  drop(values);
  drop(boxed);
+ serial::info(format_args!("kernel heap ready"));
+
+ if !task_stacks::init() {
+  fatal("TASK STACK MAPPING FAILED");
+ }
+ serial::info(format_args!("per-task kernel stacks and guard pages ready"));
 
  let block_ready = virtio_blk::init();
  let fat_ready = block_ready && fat32::init();
- core::hint::black_box((block_ready, fat_ready));
+ serial::info(format_args!("storage: virtio_blk={}, fat32={}", block_ready, fat_ready));
 
  scheduler::init();
  unsafe {
@@ -63,10 +78,12 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
  timer::init();
  }
  interrupts::enable();
+ serial::info(format_args!("interrupts enabled, starting shell"));
  shell::run()
 }
 
 fn fatal(message: &str) -> ! {
+ serial::error(format_args!("fatal: {}", message));
  framebuffer::panic_header(message);
  halt()
 }
@@ -76,8 +93,9 @@ pub fn halt() -> ! {
 }
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
  unsafe { core::arch::asm!("cli", options(nomem, nostack)) };
+ serial::emergency(format_args!("panic: {}", info));
  framebuffer::panic_header("RUST KERNEL PANIC");
  halt()
 }
