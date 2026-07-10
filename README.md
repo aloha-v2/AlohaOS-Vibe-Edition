@@ -12,6 +12,16 @@
 - Timer scheduler hook и сохранение полного GPR interrupt frame; cross-task switch временно отключён до реализации полного x86_64 context (FPU/SIMD, kernel stacks, lifecycle).
 - Legacy VirtIO Block и read-only FAT32: `ls /`, `cat hello.txt`.
 - Shell: history, `help`, `clear`, `meminfo`, `uptime`, `tasks`, `ls`, `cat`, `reboot`.
+- Allocation-free COM1 kernel log с уровнями DEBUG, INFO и ERROR, включая panic output.
+
+## Прогресс по roadmap
+
+- Восстановлен полный boot flow ядра после регрессии со splash-only запуском.
+- Добавлен COM1 logger без зависимости от heap.
+- Логируются этапы framebuffer, GDT/IDT, memory/paging, heap, storage, interrupts и запуск shell.
+- Следующий этап: task lifecycle, отдельные kernel stacks и полный x86_64 context switch.
+
+Подробный порядок работ и статусы: [TODO.md](TODO.md).
 
 ## Windows
 
