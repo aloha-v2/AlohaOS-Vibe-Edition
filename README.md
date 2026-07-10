@@ -10,7 +10,8 @@
 - Reclaiming linked-list heap, `Box`, `Vec`, `String` и `dealloc`.
 - PIC 8259, PIT 100 Hz, uptime и PS/2 keyboard.
 - Task lifecycle: Ready, Running, Blocked, Sleeping и Dead; timer автоматически будит sleeping tasks.
-- Timer scheduler hook и сохранение полного GPR interrupt frame; cross-task switch временно отключён до реализации FPU/SIMD context и отдельных kernel stacks.
+- Для каждой задачи выделен отдельный 16 KiB kernel stack с реально unmapped 4 KiB guard page.
+- Timer scheduler hook и сохранение полного GPR interrupt frame; cross-task switch временно отключён до реализации FPU/SIMD context.
 - Legacy VirtIO Block и read-only FAT32: `ls /`, `cat hello.txt`.
 - Shell: history, `help`, `clear`, `meminfo`, `uptime`, `tasks`, `ls`, `cat`, `reboot`.
 - Allocation-free COM1 kernel log с уровнями DEBUG, INFO и ERROR, включая panic output.
@@ -19,9 +20,9 @@
 
 - Восстановлен полный boot flow ядра после регрессии со splash-only запуском.
 - Добавлен COM1 logger без зависимости от heap.
-- Логируются этапы framebuffer, GDT/IDT, memory/paging, heap, storage, interrupts и запуск shell.
-- Добавлена атомарная модель lifecycle задач и timer-driven wakeup для sleeping tasks.
-- Следующий этап: отдельные kernel stacks с guard pages, затем полный x86_64 context switch.
+- Добавлена атомарная модель lifecycle задач и timer-driven wakeup.
+- Добавлены отдельные kernel stacks в выделенном virtual range; перед каждым стеком оставлена unmapped guard page.
+- Следующий этап: полный x86_64 context (CR3, FS/GS, XSAVE/XRSTOR), затем round-robin switch.
 
 Подробный порядок работ и статусы: [TODO.md](TODO.md).
 
@@ -44,11 +45,11 @@ cat hello.txt
 meminfo
 ```
 
-`tasks` показывает состояния lifecycle, scheduling ticks и wake deadline. Межзадачное переключение пока намеренно выключено: включать его до отдельных kernel stacks и сохранения FPU/SIMD опасно из-за Double Fault.
+`tasks` показывает состояния lifecycle, scheduling ticks и wake deadline. Межзадачное переключение пока намеренно выключено до сохранения extended CPU context.
 
 ## Дальше
 
-- Отдельные kernel stacks и полный x86_64 task context.
+- Полный x86_64 task context.
 - Стабильный preemptive round-robin scheduler и stress test.
 - Запись FAT32, VFS и подкаталоги.
 - Ring 3, user address spaces и syscalls.

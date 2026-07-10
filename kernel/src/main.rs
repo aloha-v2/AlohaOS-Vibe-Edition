@@ -19,6 +19,7 @@ mod pic;
 mod keyboard;
 mod timer;
 mod scheduler;
+mod task_stacks;
 mod virtio_blk;
 mod fat32;
 mod shell;
@@ -61,6 +62,11 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
  drop(values);
  drop(boxed);
  serial::info(format_args!("kernel heap ready"));
+
+ if !task_stacks::init() {
+  fatal("TASK STACK MAPPING FAILED");
+ }
+ serial::info(format_args!("per-task kernel stacks and guard pages ready"));
 
  let block_ready = virtio_blk::init();
  let fat_ready = block_ready && fat32::init();
