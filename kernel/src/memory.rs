@@ -43,7 +43,7 @@ static mut ALLOCATOR: PhysicalFrameAllocator = PhysicalFrameAllocator::EMPTY;
 pub unsafe fn init(map: MemoryMapInfo) {
     let regions = core::slice::from_raw_parts(map.regions, map.region_count);
     let allocator = core::ptr::addr_of_mut!(ALLOCATOR);
-    (*allocator) = PhysicalFrameAllocator::EMPTY;
+    *allocator = PhysicalFrameAllocator::EMPTY;
 
     for region in regions {
         if region.kind != MemoryRegionKind::Usable || region.page_count == 0 {
@@ -54,9 +54,9 @@ pub unsafe fn init(map: MemoryMapInfo) {
             break;
         }
         let start = align_up(region.physical_start, FRAME_SIZE);
-        let end = region
-            .physical_start
-            .saturating_add(region.page_count.saturating_mul(FRAME_SIZE));
+        let end = region.physical_start.saturating_add(
+            region.page_count.saturating_mul(FRAME_SIZE),
+        );
         if start >= end {
             continue;
         }
@@ -67,17 +67,32 @@ pub unsafe fn init(map: MemoryMapInfo) {
 }
 
 pub fn allocate_frame() -> Option<u64> {
+    allocate_contiguous(1)
+}
+
+/// Reserve `count` physically contiguous 4 KiB frames.
+///
+/// This is deliberately simple and monotonic. Reclamation will be added when
+/// process address spaces need frame deallocation.
+pub fn allocate_contiguous(count: u64) -> Option<u64> {
+    if count == 0 {
+        return None;
+    }
+    let bytes = count.checked_mul(FRAME_SIZE)?;
     unsafe {
         let allocator = core::ptr::addr_of_mut!(ALLOCATOR);
-        while (*allocator).current_run < (*allocator).run_count {
-            let run = &mut (*allocator).runs[(*allocator).current_run];
-            if run.next < run.end {
-                let frame = run.next;
-                run.next += FRAME_SIZE;
-                (*allocator).allocated_frames += 1;
-                return Some(frame);
+        let mut index = (*allocator).current_run;
+        while index < (*allocator).run_count {
+            let run = &mut (*allocator).runs[index];
+            if run.next.checked_add(bytes)? <= run.end {
+                let start = run.next;
+                run.next += bytes;
+                (*allocator).allocated_frames += count;
+                (*allocator).current_run = index;
+                return Some(start);
             }
-            (*allocator).current_run += 1;
+            index += 1;
+            (*allocator).current_run = index;
         }
         None
     }
