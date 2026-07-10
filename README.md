@@ -16,7 +16,7 @@
 
 ## Scheduler status
 
-Стабильный boot path не трогает XSAVE и worker context. Команда `sched on` лениво готовит persistent frame, включает low-level trampoline и round-robin. До hardware stress-test gate не открывается автоматически.
+Hardware smoke на Windows/QEMU пройден: после `sched on` обе задачи дошли до 588 context switches, worker heartbeat вырос до 588, shell остался жив, `ls /` и `cat hello.txt` продолжили работать. Следующий барьер: часовой stress-test без Double Fault, зависаний и порчи FAT32.
 
 ## Windows
 
@@ -26,11 +26,12 @@ git reset --hard origin/brain/m0-context-switch
 .\scripts\run-qemu.ps1
 ```
 
-Проверка: `tasks`, затем `sched on`, снова `tasks`, `ls /`, `cat hello.txt`. Если scheduler нестабилен, перезапустить VM: gate намеренно не переживает reboot.
+Проверка: `tasks`, затем `sched on`, снова `tasks`, `ls /`, `cat hello.txt`. Gate намеренно не переживает reboot.
 
 ## Дальше
 
-- Hardware smoke и часовой stress-test без Double Fault.
+- Автоматизировать длительный scheduler stress-test.
+- Часовой прогон без Double Fault.
 - После проверки включить round-robin по умолчанию.
 - IRQ-safe synchronization и frame deallocation.
 
