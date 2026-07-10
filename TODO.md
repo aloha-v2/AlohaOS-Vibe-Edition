@@ -2,13 +2,13 @@
 
 ## 1. Стабильность ядра
 
-- [ ] Полный x86_64 context switch: XSAVE/CR3/FS/GS prototype gated off до подключения persistent IST frames и hardware stress-test.
+- [ ] Полный x86_64 context switch: XSAVE/CR3/FS/GS prototype gated off до hardware stress-test.
 - [x] Lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
 - [x] Guarded kernel stack infrastructure.
 - [ ] Preemptive round-robin и часовой stress-test.
 - [x] Dedicated scheduler/timer IST stack, проверен на Windows/QEMU.
 - [x] Assembly-only extended-context trampoline (CR3, FS/GS, XSAVE/XRSTOR), пока gated off.
-- [ ] Persistent per-task interrupt frames для переключения с timer IST.
+- [x] Persistent per-task GPR/IRET frames для переключения с timer IST, пока gated off.
 - [ ] Spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
 - [ ] Убрать `static mut` из горячих подсистем.
 - [ ] Освобождение физических фреймов.
@@ -41,8 +41,7 @@
 
 ## Ближайшие задачи
 
-1. Persistent per-task interrupt frames для timer IST.
-2. Round-robin за runtime gate.
-3. Hardware stress-test без Double Fault.
-4. IRQ-safe synchronization.
-5. Physical frame deallocation.
+1. Round-robin за runtime gate.
+2. Hardware stress-test без Double Fault.
+3. IRQ-safe synchronization.
+4. Physical frame deallocation.

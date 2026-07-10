@@ -1,7 +1,8 @@
 //! Extended x86_64 task context with an assembly-only switch trampoline.
 //!
-//! Rust prepares context slots and chooses tasks. Once the trampoline starts,
-//! CR3, FS/GS and XSAVE state are saved/restored without calling back into Rust.
+//! Timer interrupts arrive on a shared IST stack. Before switching tasks the
+//! trampoline copies the complete GPR + IRET frame into a persistent per-task
+//! slot, then saves/restores CR3, FS/GS and XSAVE state without re-entering Rust.
 
 use core::arch::{asm, global_asm, x86_64::__cpuid_count};
 use core::cell::UnsafeCell;
@@ -12,15 +13,16 @@ use crate::serial;
 const TASK_COUNT: usize = 2;
 const XSTATE_CAPACITY: usize = 16 * 1024;
 const CONTEXT_XSTATE_OFFSET: usize = 64;
+const FRAME_QWORDS: usize = 20;
+const INTERRUPT_FLAGS: u64 = 0x202;
 
 #[repr(C, align(64))]
 struct Xstate([u8; XSTATE_CAPACITY]);
 
-/// Keep these offsets in sync with `aloha_context_capture` and
-/// `aloha_context_switch` below.
+/// Keep these offsets in sync with the assembly below.
 #[repr(C, align(64))]
 struct TaskContext {
-    saved_stack: u64, // 0
+    saved_frame: u64, // 0
     cr3: u64,         // 8
     fs_base: u64,     // 16
     gs_base: u64,     // 24
@@ -31,7 +33,7 @@ struct TaskContext {
 
 impl TaskContext {
     const EMPTY: Self = Self {
-        saved_stack: 0,
+        saved_frame: 0,
         cr3: 0,
         fs_base: 0,
         gs_base: 0,
@@ -41,12 +43,23 @@ impl TaskContext {
     };
 }
 
+/// Layout consumed by the timer ISR: 15 GPRs followed by the five qwords the
+/// CPU pushes when an IST stack switch happens (RIP, CS, RFLAGS, RSP, SS).
+#[repr(C, align(16))]
+struct InterruptFrame([u64; FRAME_QWORDS]);
+
 struct ContextSlots([UnsafeCell<TaskContext>; TASK_COUNT]);
 unsafe impl Sync for ContextSlots {}
+struct FrameSlots([UnsafeCell<InterruptFrame>; TASK_COUNT]);
+unsafe impl Sync for FrameSlots {}
 
 static CONTEXTS: ContextSlots = ContextSlots([
     UnsafeCell::new(TaskContext::EMPTY),
     UnsafeCell::new(TaskContext::EMPTY),
+]);
+static FRAMES: FrameSlots = FrameSlots([
+    UnsafeCell::new(InterruptFrame([0; FRAME_QWORDS])),
+    UnsafeCell::new(InterruptFrame([0; FRAME_QWORDS])),
 ]);
 static READY: AtomicBool = AtomicBool::new(false);
 static XCR0_MASK: AtomicU64 = AtomicU64::new(0);
@@ -56,7 +69,8 @@ unsafe extern "C" {
     fn aloha_context_switch(
         current: *mut TaskContext,
         next: *const TaskContext,
-        current_stack: u64,
+        ist_frame: u64,
+        persistent_frame: *mut InterruptFrame,
     ) -> u64;
 }
 
@@ -98,6 +112,8 @@ pub fn init() -> bool {
         (*CONTEXTS.0[0].get()).xcr0_mask = enabled;
         aloha_context_capture(CONTEXTS.0[0].get());
         ptr::copy_nonoverlapping(CONTEXTS.0[0].get(), CONTEXTS.0[1].get(), 1);
+        (*CONTEXTS.0[0].get()).saved_frame = 0;
+        (*CONTEXTS.0[1].get()).saved_frame = 0;
     }
 
     XCR0_MASK.store(enabled, Ordering::Release);
@@ -117,27 +133,57 @@ pub fn xcr0_mask() -> u64 {
     XCR0_MASK.load(Ordering::Acquire)
 }
 
-/// Install the persistent interrupt-frame pointer for a newly created task.
-pub unsafe fn prepare_stack(task: usize, stack: u64) -> bool {
-    let Some(slot) = CONTEXTS.0.get(task) else { return false };
-    (*slot.get()).saved_stack = stack;
+/// Build the first persistent IST frame for a kernel task.
+///
+/// `stack_top` is the top of its mapped stack and `task_returned` is a fatal
+/// fallback used if the task entry unexpectedly returns.
+pub unsafe fn prepare_kernel_task(
+    task: usize,
+    stack_top: u64,
+    entry: u64,
+    task_returned: u64,
+    code_selector: u64,
+    stack_selector: u64,
+) -> bool {
+    let (Some(context), Some(frame)) = (CONTEXTS.0.get(task), FRAMES.0.get(task)) else {
+        return false;
+    };
+    let Some(task_rsp) = stack_top.checked_sub(8) else { return false };
+    *(task_rsp as *mut u64) = task_returned;
+
+    let frame = &mut *frame.get();
+    frame.0.fill(0);
+    frame.0[15] = entry;
+    frame.0[16] = code_selector;
+    frame.0[17] = INTERRUPT_FLAGS;
+    frame.0[18] = task_rsp;
+    frame.0[19] = stack_selector;
+    (*context.get()).saved_frame = frame as *mut InterruptFrame as u64;
     true
 }
 
-/// Save the interrupted task and return the persistent frame to restore.
-///
-/// The hardware transition itself is entirely inside `aloha_context_switch`.
-pub unsafe fn switch(current: usize, next: usize, current_stack: u64) -> u64 {
+/// Save the interrupted task's complete IST frame and return the persistent
+/// frame of the task selected for restore.
+pub unsafe fn switch(current: usize, next: usize, current_ist_frame: u64) -> u64 {
     if current == next || !is_ready() {
-        return current_stack;
+        return current_ist_frame;
     }
-    let (Some(current), Some(next)) = (CONTEXTS.0.get(current), CONTEXTS.0.get(next)) else {
-        return current_stack;
+    let (Some(current_context), Some(next_context), Some(current_frame)) = (
+        CONTEXTS.0.get(current),
+        CONTEXTS.0.get(next),
+        FRAMES.0.get(current),
+    ) else {
+        return current_ist_frame;
     };
-    if (*next.get()).saved_stack == 0 {
-        return current_stack;
+    if (*next_context.get()).saved_frame == 0 {
+        return current_ist_frame;
     }
-    aloha_context_switch(current.get(), next.get(), current_stack)
+    aloha_context_switch(
+        current_context.get(),
+        next_context.get(),
+        current_ist_frame,
+        current_frame.get(),
+    )
 }
 
 #[inline]
@@ -180,51 +226,57 @@ aloha_context_capture:
 .global aloha_context_switch
 .type aloha_context_switch,@function
 aloha_context_switch:
-    mov r8, rdi
-    mov r9, rsi
-    mov [r8], rdx
+    mov r9, rdi
+    mov r10, rsi
+    mov r11, rcx
+
+    mov rdi, rcx
+    mov rsi, rdx
+    mov ecx, 20
+    rep movsq
+    mov [r9], r11
 
     mov rax, cr3
-    mov [r8 + 8], rax
+    mov [r9 + 8], rax
 
     mov ecx, 0xc0000100
     rdmsr
     shl rdx, 32
     or rax, rdx
-    mov [r8 + 16], rax
+    mov [r9 + 16], rax
 
     mov ecx, 0xc0000101
     rdmsr
     shl rdx, 32
     or rax, rdx
-    mov [r8 + 24], rax
-
-    mov eax, [r8 + 32]
-    mov edx, [r8 + 36]
-    xsave64 [r8 + 64]
-
-    mov r10, cr3
-    mov r11, [r9 + 8]
-    cmp r10, r11
-    je 1f
-    mov cr3, r11
-1:
-    mov rax, [r9 + 16]
-    mov rdx, rax
-    shr rdx, 32
-    mov ecx, 0xc0000100
-    wrmsr
-
-    mov rax, [r9 + 24]
-    mov rdx, rax
-    shr rdx, 32
-    mov ecx, 0xc0000101
-    wrmsr
+    mov [r9 + 24], rax
 
     mov eax, [r9 + 32]
     mov edx, [r9 + 36]
-    xrstor64 [r9 + 64]
-    mov rax, [r9]
+    xsave64 [r9 + 64]
+
+    mov r8, cr3
+    mov r11, [r10 + 8]
+    cmp r8, r11
+    je 1f
+    mov cr3, r11
+1:
+    mov rax, [r10 + 16]
+    mov rdx, rax
+    shr rdx, 32
+    mov ecx, 0xc0000100
+    wrmsr
+
+    mov rax, [r10 + 24]
+    mov rdx, rax
+    shr rdx, 32
+    mov ecx, 0xc0000101
+    wrmsr
+
+    mov eax, [r10 + 32]
+    mov edx, [r10 + 36]
+    xrstor64 [r10 + 64]
+    mov rax, [r10]
     ret
 .size aloha_context_switch, .-aloha_context_switch
 "#);
