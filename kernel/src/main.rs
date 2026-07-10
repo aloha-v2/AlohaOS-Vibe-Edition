@@ -10,6 +10,7 @@ mod framebuffer;
 mod gdt;
 mod interrupts;
 mod memory;
+mod paging;
 
 #[no_mangle]
 pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
@@ -28,20 +29,46 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
     framebuffer::write_line("GDT TSS IDT READY");
 
     unsafe { memory::init(info.memory_map) };
-    let stats = memory::stats();
+    let before = memory::stats();
     framebuffer::write_line("UEFI MEMORY MAP READY");
-    framebuffer::write_label_hex("MEMORY REGIONS: ", info.memory_map.region_count as u64);
-    framebuffer::write_label_hex("USABLE FRAMES:  ", stats.total_usable);
-    framebuffer::write_label_hex("FREE FRAMES:    ", stats.free);
+    framebuffer::write_label_hex("USABLE FRAMES:  ", before.total_usable);
 
-    // Prove that allocation works without touching the returned frame yet.
-    if let Some(frame) = memory::allocate_frame() {
-        framebuffer::write_label_hex("FIRST FRAME:    ", frame);
-        framebuffer::write_line("FRAME ALLOCATOR READY");
-    } else {
-        framebuffer::panic_header("NO USABLE PHYSICAL MEMORY");
+    // Reserve one ordinary frame before page-table construction and use it to
+    // prove that the physical and higher-half virtual addresses are aliases.
+    let test_frame = match memory::allocate_frame() {
+        Some(frame) => frame,
+        None => fatal("NO USABLE PHYSICAL MEMORY"),
+    };
+
+    let paging = match paging::init(info.memory_map) {
+        Ok(stats) => stats,
+        Err(paging::PagingError::OutOfFrames) => fatal("PAGE TABLE ALLOCATION FAILED"),
+        Err(paging::PagingError::PhysicalAddressTooLarge) => {
+            fatal("PHYSICAL MEMORY EXCEEDS DIRECT MAP")
+        }
+    };
+
+    if !paging::verify_direct_map(test_frame) {
+        fatal("HIGHER HALF DIRECT MAP TEST FAILED");
     }
 
+    framebuffer::write_line("4 LEVEL PAGING READY");
+    framebuffer::write_line("HIGHER HALF DIRECT MAP READY");
+    framebuffer::write_label_hex("PML4 PHYSICAL:   ", paging.pml4_physical);
+    framebuffer::write_label_hex("MAPPED 2M PAGES: ", paging.mapped_2m_pages);
+    framebuffer::write_label_hex("PAGE TABLES:     ", paging.table_frames);
+    framebuffer::write_label_hex("MAPPED BYTES:    ", paging.mapped_physical_bytes);
+
+    let after = memory::stats();
+    framebuffer::write_label_hex("FREE FRAMES:     ", after.free);
+    framebuffer::write_line("");
+    framebuffer::write_line("MEMORY STAGE 2 READY");
+
+    halt()
+}
+
+fn fatal(message: &str) -> ! {
+    framebuffer::panic_header(message);
     halt()
 }
 
