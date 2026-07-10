@@ -25,7 +25,7 @@ static mut MEMORY_REGIONS: [MemoryRegion; MAX_MEMORY_REGIONS] =
     [MemoryRegion::EMPTY; MAX_MEMORY_REGIONS];
 
 #[entry]
-fn main(image_handle: Handle, mut system_table: SystemTable) -> Status {
+fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     uefi::helpers::init(&mut system_table).unwrap();
     let bs = system_table.boot_services();
 
@@ -39,11 +39,7 @@ fn main(image_handle: Handle, mut system_table: SystemTable) -> Status {
         let mut framebuffer = gop.frame_buffer();
         (
             framebuffer.as_mut_ptr() as u64,
-            framebuffer.size(),
-            width,
-            height,
-            stride,
-            format,
+            framebuffer.size(), width, height, stride, format,
         )
     };
 
@@ -58,13 +54,11 @@ fn main(image_handle: Handle, mut system_table: SystemTable) -> Status {
         let device = loaded_image.device().unwrap();
         let mut sfs = bs.open_protocol_exclusive::<SimpleFileSystem>(device).unwrap();
         let mut root = sfs.open_volume().unwrap();
-        let handle = root
-            .open(
-                uefi::cstr16!("alohaos\\kernel.elf"),
-                FileMode::Read,
-                FileAttribute::empty(),
-            )
-            .unwrap();
+        let handle = root.open(
+            uefi::cstr16!("alohaos\\kernel.elf"),
+            FileMode::Read,
+            FileAttribute::empty(),
+        ).unwrap();
         let mut file = match handle.into_type().unwrap() {
             FileType::Regular(file) => file,
             FileType::Dir(_) => panic!("kernel.elf is a directory"),
@@ -87,8 +81,7 @@ fn main(image_handle: Handle, mut system_table: SystemTable) -> Status {
         let file_size = header.file_size() as usize;
         let offset = header.offset() as usize;
         let pages = (memory_size + 0xfff) / 0x1000;
-        bs.allocate_pages(AllocateType::Address(physical), MemoryType::LOADER_DATA, pages)
-            .unwrap();
+        bs.allocate_pages(AllocateType::Address(physical), MemoryType::LOADER_DATA, pages).unwrap();
         unsafe {
             let destination = physical as *mut u8;
             ptr::copy(kernel_bytes.as_ptr().add(offset), destination, file_size);
@@ -96,8 +89,6 @@ fn main(image_handle: Handle, mut system_table: SystemTable) -> Status {
         }
     }
 
-    // exit_boot_services returns the final map. Copy it into a stable, simple
-    // boot protocol owned by AlohaBoot so the kernel does not depend on UEFI.
     let (_runtime, memory_map) = system_table.exit_boot_services(MemoryType::LOADER_DATA);
     let mut region_count = 0usize;
     for descriptor in memory_map.entries().take(MAX_MEMORY_REGIONS) {
@@ -107,16 +98,13 @@ fn main(image_handle: Handle, mut system_table: SystemTable) -> Status {
             MemoryRegionKind::AcpiReclaimable
         } else if descriptor.ty == MemoryType::ACPI_NON_VOLATILE {
             MemoryRegionKind::AcpiNvs
-        } else if descriptor.ty == MemoryType::MMIO
-            || descriptor.ty == MemoryType::MMIO_PORT_SPACE
-        {
+        } else if descriptor.ty == MemoryType::MMIO || descriptor.ty == MemoryType::MMIO_PORT_SPACE {
             MemoryRegionKind::Mmio
         } else if descriptor.att.contains(MemoryAttribute::RUNTIME) {
             MemoryRegionKind::Runtime
         } else {
             MemoryRegionKind::Reserved
         };
-
         unsafe {
             MEMORY_REGIONS[region_count] = MemoryRegion {
                 physical_start: descriptor.phys_start,
@@ -130,12 +118,7 @@ fn main(image_handle: Handle, mut system_table: SystemTable) -> Status {
     unsafe {
         BOOT_INFO = BootInfo {
             framebuffer: FrameBufferInfo {
-                addr: fb_addr,
-                size: fb_size,
-                width,
-                height,
-                stride,
-                pixel_format,
+                addr: fb_addr, size: fb_size, width, height, stride, pixel_format,
             },
             memory_map: MemoryMapInfo {
                 regions: ptr::addr_of!(MEMORY_REGIONS).cast::<MemoryRegion>(),
@@ -144,7 +127,6 @@ fn main(image_handle: Handle, mut system_table: SystemTable) -> Status {
         };
     }
 
-    let entry: extern "sysv64" fn(*const BootInfo) -> ! =
-        unsafe { mem::transmute(entry_point) };
+    let entry: extern "sysv64" fn(*const BootInfo) -> ! = unsafe { mem::transmute(entry_point) };
     entry(ptr::addr_of!(BOOT_INFO));
 }
