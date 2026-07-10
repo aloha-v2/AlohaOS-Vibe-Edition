@@ -9,6 +9,7 @@ mod font;
 mod framebuffer;
 mod gdt;
 mod interrupts;
+mod memory;
 
 #[no_mangle]
 pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
@@ -22,17 +23,24 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
     framebuffer::set_color(0xd7, 0xe0, 0xee);
     framebuffer::write_line("");
 
-    // These breadcrumbs remain visible if a descriptor-table load faults.
-    framebuffer::write_line("LOADING GDT AND TSS");
     gdt::init();
-    framebuffer::write_line("GDT  READY");
-    framebuffer::write_line("TSS  READY");
-
-    framebuffer::write_line("LOADING IDT");
     interrupts::init();
-    framebuffer::write_line("IDT  READY");
-    framebuffer::write_line("");
-    framebuffer::write_line("CPU EXCEPTION HANDLERS READY");
+    framebuffer::write_line("GDT TSS IDT READY");
+
+    unsafe { memory::init(info.memory_map) };
+    let stats = memory::stats();
+    framebuffer::write_line("UEFI MEMORY MAP READY");
+    framebuffer::write_label_hex("MEMORY REGIONS: ", info.memory_map.region_count as u64);
+    framebuffer::write_label_hex("USABLE FRAMES:  ", stats.total_usable);
+    framebuffer::write_label_hex("FREE FRAMES:    ", stats.free);
+
+    // Prove that allocation works without touching the returned frame yet.
+    if let Some(frame) = memory::allocate_frame() {
+        framebuffer::write_label_hex("FIRST FRAME:    ", frame);
+        framebuffer::write_line("FRAME ALLOCATOR READY");
+    } else {
+        framebuffer::panic_header("NO USABLE PHYSICAL MEMORY");
+    }
 
     halt()
 }

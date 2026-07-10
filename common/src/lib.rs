@@ -1,49 +1,70 @@
-//! Shared contract between AlohaBoot and the kernel.
-//!
-//! Kept intentionally tiny and `#[repr(C)]` so both sides agree on the exact
-//! memory layout across the boot handoff.
+//! Shared ABI between AlohaBoot and the AlohaOS kernel.
 #![no_std]
 
-/// Byte order of each 32-bit pixel in the framebuffer.
+pub const MAX_MEMORY_REGIONS: usize = 256;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum PixelFormat {
-    /// Red is the least-significant byte.
     Rgb = 0,
-    /// Blue is the least-significant byte (the common UEFI case).
     Bgr = 1,
-    /// Anything we do not explicitly handle.
     Unknown = 2,
 }
 
-/// Everything the kernel needs to draw to the screen.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FrameBufferInfo {
-    /// Physical base address of the linear framebuffer.
     pub addr: u64,
-    /// Size of the framebuffer in bytes.
     pub size: usize,
-    /// Visible width in pixels.
     pub width: usize,
-    /// Visible height in pixels.
     pub height: usize,
-    /// Pixels per scanline (may exceed `width` due to padding).
     pub stride: usize,
-    /// Pixel byte order.
     pub pixel_format: PixelFormat,
 }
 
-/// Handed from the bootloader to the kernel entry point.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum MemoryRegionKind {
+    Reserved = 0,
+    Usable = 1,
+    AcpiReclaimable = 2,
+    AcpiNvs = 3,
+    Mmio = 4,
+    Runtime = 5,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct MemoryRegion {
+    pub physical_start: u64,
+    pub page_count: u64,
+    pub kind: MemoryRegionKind,
+}
+
+impl MemoryRegion {
+    pub const EMPTY: Self = Self {
+        physical_start: 0,
+        page_count: 0,
+        kind: MemoryRegionKind::Reserved,
+    };
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct MemoryMapInfo {
+    pub regions: *const MemoryRegion,
+    pub region_count: usize,
+}
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct BootInfo {
     pub framebuffer: FrameBufferInfo,
+    pub memory_map: MemoryMapInfo,
 }
 
 impl BootInfo {
-    /// A zeroed placeholder used before the real values are filled in.
-    pub const EMPTY: BootInfo = BootInfo {
+    pub const EMPTY: Self = Self {
         framebuffer: FrameBufferInfo {
             addr: 0,
             size: 0,
@@ -51,6 +72,10 @@ impl BootInfo {
             height: 0,
             stride: 0,
             pixel_format: PixelFormat::Unknown,
+        },
+        memory_map: MemoryMapInfo {
+            regions: core::ptr::null(),
+            region_count: 0,
         },
     };
 }
