@@ -1,4 +1,4 @@
-//! IDT, CPU exception stubs, timer IRQ and keyboard IRQ.
+//! IDT, CPU exception stubs, preemptive timer IRQ and keyboard IRQ.
 
 use core::arch::{asm, global_asm};
 use core::mem::size_of;
@@ -70,13 +70,11 @@ pub fn init() {
     }
 }
 
-pub fn enable() {
-    unsafe { asm!("sti", options(nomem, nostack)) }
-}
+pub fn enable() { unsafe { asm!("sti", options(nomem, nostack)) } }
 
 #[no_mangle]
-pub extern "C" fn rust_timer_interrupt() {
-    timer::interrupt();
+pub extern "C" fn rust_timer_interrupt(current_stack: u64) -> u64 {
+    timer::interrupt(current_stack)
 }
 
 #[no_mangle]
@@ -121,7 +119,52 @@ isr_page_fault: cli; mov rsi,[rsp]; mov rdx,[rsp+8]; mov rcx,cr2; mov edi,14; jm
 exception_trampoline: and rsp,-16; call rust_exception_handler; ud2
 
 .global irq_timer
-irq_timer: push rax;push rcx;push rdx;push rsi;push rdi;push r8;push r9;push r10;push r11;push rbx;push rbp;push r12;push r13;push r14;push r15;mov rbx,rsp;and rsp,-16;call rust_timer_interrupt;mov rsp,rbx;pop r15;pop r14;pop r13;pop r12;pop rbp;pop rbx;pop r11;pop r10;pop r9;pop r8;pop rdi;pop rsi;pop rdx;pop rcx;pop rax;iretq
+irq_timer:
+    push rax
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+    push r11
+    push rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
+    mov rdi, rsp
+    and rsp, -16
+    call rust_timer_interrupt
+    mov rsp, rax
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rax
+    iretq
+
 .global irq_keyboard
-irq_keyboard: push rax;push rcx;push rdx;push rsi;push rdi;push r8;push r9;push r10;push r11;push rbx;push rbp;push r12;push r13;push r14;push r15;mov rbx,rsp;and rsp,-16;call rust_keyboard_interrupt;mov rsp,rbx;pop r15;pop r14;pop r13;pop r12;pop rbp;pop rbx;pop r11;pop r10;pop r9;pop r8;pop rdi;pop rsi;pop rdx;pop rcx;pop rax;iretq
+irq_keyboard:
+    push rax;push rcx;push rdx;push rsi;push rdi;push r8;push r9;push r10;push r11
+    push rbx;push rbp;push r12;push r13;push r14;push r15
+    mov rbx,rsp
+    and rsp,-16
+    call rust_keyboard_interrupt
+    mov rsp,rbx
+    pop r15;pop r14;pop r13;pop r12;pop rbp;pop rbx;pop r11;pop r10;pop r9;pop r8
+    pop rdi;pop rsi;pop rdx;pop rcx;pop rax
+    iretq
 "#);
