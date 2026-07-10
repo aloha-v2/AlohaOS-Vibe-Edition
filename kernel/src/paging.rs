@@ -1,13 +1,13 @@
 //! Transitional x86_64 paging owned by the kernel.
 //!
 //! We preserve UEFI's lower-half identity mappings, install a fresh PML4, and
-//! build a higher-half direct map for the first 512 GiB of physical memory.
+//! build a higher-half direct map for usable physical RAM. MMIO and firmware
+//! ranges may live near the top of the 64-bit address space and are not RAM.
 
 use core::arch::asm;
 use core::ptr;
 
-use common::MemoryMapInfo;
-
+use common::{MemoryMapInfo, MemoryRegionKind};
 use crate::memory;
 
 pub const PHYSICAL_MEMORY_OFFSET: u64 = 0xffff_8000_0000_0000;
@@ -21,9 +21,7 @@ const HUGE_PAGE: u64 = 1 << 7;
 const DIRECT_MAP_PML4_INDEX: usize = 256;
 
 #[repr(C, align(4096))]
-struct PageTable {
-    entries: [u64; ENTRY_COUNT],
-}
+struct PageTable { entries: [u64; ENTRY_COUNT] }
 
 pub struct PagingStats {
     pub pml4_physical: u64,
@@ -32,14 +30,13 @@ pub struct PagingStats {
     pub mapped_physical_bytes: u64,
 }
 
-pub enum PagingError {
-    OutOfFrames,
-    PhysicalAddressTooLarge,
-}
+pub enum PagingError { OutOfFrames, PhysicalAddressTooLarge }
 
 pub fn init(memory_map: MemoryMapInfo) -> Result<PagingStats, PagingError> {
-    let maximum_physical = maximum_physical_address(memory_map);
-    if maximum_physical > DIRECT_MAP_LIMIT {
+    // Do not use the highest UEFI descriptor here. QEMU exposes MMIO windows
+    // close to 4 GiB and firmware can describe addresses far above actual RAM.
+    let maximum_ram = maximum_usable_ram_address(memory_map);
+    if maximum_ram == 0 || maximum_ram > DIRECT_MAP_LIMIT {
         return Err(PagingError::PhysicalAddressTooLarge);
     }
 
@@ -51,19 +48,12 @@ pub fn init(memory_map: MemoryMapInfo) -> Result<PagingStats, PagingError> {
     unsafe {
         zero_frame(new_pml4_frame);
         zero_frame(direct_pdpt_frame);
+        ptr::copy_nonoverlapping(old_cr3 as *const PageTable, new_pml4_frame as *mut PageTable, 1);
 
-        // Keep the firmware-created identity mappings alive while the kernel is
-        // still linked at 0x200000. Only the higher-half direct-map slot is new.
-        ptr::copy_nonoverlapping(
-            old_cr3 as *const PageTable,
-            new_pml4_frame as *mut PageTable,
-            1,
-        );
         let pml4 = &mut *(new_pml4_frame as *mut PageTable);
         pml4.entries[DIRECT_MAP_PML4_INDEX] = direct_pdpt_frame | PRESENT | WRITABLE;
-
         let pdpt = &mut *(direct_pdpt_frame as *mut PageTable);
-        let mapped_end = align_up(maximum_physical, PAGE_2M);
+        let mapped_end = align_up(maximum_ram, PAGE_2M);
         let mut physical = 0u64;
         let mut mapped_pages = 0u64;
         let mut current_pdpt_index = usize::MAX;
@@ -78,16 +68,14 @@ pub fn init(memory_map: MemoryMapInfo) -> Result<PagingStats, PagingError> {
                 pdpt.entries[pdpt_index] = current_pd_frame | PRESENT | WRITABLE;
                 current_pdpt_index = pdpt_index;
             }
-
-            let page_directory = &mut *(current_pd_frame as *mut PageTable);
-            let page_index = ((physical >> 21) & 0x1ff) as usize;
-            page_directory.entries[page_index] = physical | PRESENT | WRITABLE | HUGE_PAGE;
+            let directory = &mut *(current_pd_frame as *mut PageTable);
+            let index = ((physical >> 21) & 0x1ff) as usize;
+            directory.entries[index] = physical | PRESENT | WRITABLE | HUGE_PAGE;
             physical += PAGE_2M;
             mapped_pages += 1;
         }
 
         write_cr3(new_pml4_frame);
-
         Ok(PagingStats {
             pml4_physical: new_pml4_frame,
             mapped_2m_pages: mapped_pages,
@@ -97,29 +85,27 @@ pub fn init(memory_map: MemoryMapInfo) -> Result<PagingStats, PagingError> {
     }
 }
 
-/// Verify that an allocated physical frame and its higher-half alias address
-/// the same storage. The caller owns `physical_frame`.
 pub fn verify_direct_map(physical_frame: u64) -> bool {
     unsafe {
         let physical = physical_frame as *mut u64;
-        let virtual_alias = PHYSICAL_MEMORY_OFFSET.wrapping_add(physical_frame) as *const u64;
+        let alias = PHYSICAL_MEMORY_OFFSET.wrapping_add(physical_frame) as *const u64;
         const TEST_VALUE: u64 = 0xa10a_05d1_4ec7_0001;
         ptr::write_volatile(physical, TEST_VALUE);
-        ptr::read_volatile(virtual_alias) == TEST_VALUE
+        ptr::read_volatile(alias) == TEST_VALUE
     }
 }
 
-fn maximum_physical_address(map: MemoryMapInfo) -> u64 {
-    if map.regions.is_null() {
-        return 0;
-    }
+fn maximum_usable_ram_address(map: MemoryMapInfo) -> u64 {
+    if map.regions.is_null() { return 0; }
     let regions = unsafe { core::slice::from_raw_parts(map.regions, map.region_count) };
-    regions.iter().fold(0, |maximum, region| {
-        let end = region
-            .physical_start
-            .saturating_add(region.page_count.saturating_mul(memory::FRAME_SIZE));
-        maximum.max(end)
-    })
+    regions
+        .iter()
+        .filter(|region| region.kind == MemoryRegionKind::Usable)
+        .fold(0, |maximum, region| {
+            maximum.max(region.physical_start.saturating_add(
+                region.page_count.saturating_mul(memory::FRAME_SIZE),
+            ))
+        })
 }
 
 unsafe fn zero_frame(frame: u64) {
