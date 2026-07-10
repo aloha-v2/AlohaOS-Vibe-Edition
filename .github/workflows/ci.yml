@@ -12,41 +12,28 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-      - name: Install Rust toolchain and targets
-        run: |
-          rustup show
-          rustup target add x86_64-unknown-uefi x86_64-unknown-none
-      - name: Build AlohaBoot
+      - uses: actions/checkout@v5
+      - name: Install Rust targets
+        run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build AlohaBoot and kernel
         shell: bash
         run: |
           set +e
           cargo build --release --target x86_64-unknown-uefi -p alohaboot 2>&1 | tee boot-build.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            message=$(tail -n 40 boot-build.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
-            echo "::error title=AlohaBoot build failed::$message"
-            exit "$status"
-          fi
-      - name: Build kernel
-        shell: bash
-        run: |
-          set +e
+          boot=${PIPESTATUS[0]}
           cargo build --release --target x86_64-unknown-none -p kernel 2>&1 | tee kernel-build.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            message=$(tail -n 60 kernel-build.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
-            echo "::error title=Kernel build failed::$message"
-            exit "$status"
+          kernel=${PIPESTATUS[0]}
+          if [ "$boot" -ne 0 ] || [ "$kernel" -ne 0 ]; then
+            message=$(cat boot-build.log kernel-build.log | tail -n 80 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=Rust build failed::$message"
+            exit 1
           fi
 
   qemu-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
       - name: Install QEMU, OVMF and Rust targets
         run: |
           sudo apt-get update
@@ -57,7 +44,11 @@ jobs:
       - name: Boot for 15 seconds
         shell: bash
         run: |
-          OVMF=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' | head -n 1)
+          if [ -f /usr/share/OVMF/OVMF_CODE.fd ]; then
+            OVMF=/usr/share/OVMF/OVMF_CODE.fd
+          else
+            OVMF=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' ! -name '*secboot*' ! -name '*ms*' | head -n 1)
+          fi
           test -n "$OVMF"
           set +e
           timeout 15s qemu-system-x86_64 \
@@ -69,12 +60,14 @@ jobs:
             -monitor none \
             -serial file:serial.log \
             -net none \
-            -no-reboot
+            -no-reboot >qemu.log 2>&1
           status=$?
           set -e
-          cat serial.log
+          cat qemu.log
+          test -f serial.log && cat serial.log
           if [ "$status" -ne 124 ]; then
-            echo "::error title=QEMU stopped early::QEMU exited with status $status before the smoke-test timeout"
+            message=$(tail -n 40 qemu.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=QEMU stopped early::$message"
             exit 1
           fi
           grep -q "interrupts enabled, starting shell" serial.log
