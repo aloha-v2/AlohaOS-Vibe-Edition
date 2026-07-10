@@ -1,8 +1,7 @@
 //! Minimal preemptive round-robin scheduler for kernel threads.
 //!
-//! PIT IRQ0 saves the complete general-purpose context. The assembly ISR gives
-//! that stack pointer to `on_timer_tick`, which returns the stack of the task
-//! that should resume through `iretq`.
+//! PIT IRQ0 saves the general-purpose context. The timer ISR gives that stack
+//! pointer to the scheduler and restores the selected task through `iretq`.
 
 use core::arch::asm;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -12,7 +11,9 @@ const STACK_SIZE: usize = 64 * 1024;
 const QUANTUM_TICKS: u64 = 5;
 const KERNEL_CODE_SELECTOR: u64 = 0x08;
 const INITIAL_RFLAGS: u64 = 0x202;
-const CONTEXT_WORDS: usize = 18;
+const SAVED_REGISTER_WORDS: usize = 15;
+const IRET_FRAME_WORDS: usize = 3;
+const CONTEXT_WORDS: usize = SAVED_REGISTER_WORDS + IRET_FRAME_WORDS;
 
 #[repr(C, align(16))]
 struct KernelStack([u8; STACK_SIZE]);
@@ -70,8 +71,6 @@ pub fn init() {
     }
 }
 
-/// Called on every timer interrupt with the stack produced by the IRQ stub.
-/// It returns the stack that the stub must restore before `iretq`.
 #[no_mangle]
 pub extern "C" fn scheduler_on_timer_tick(current_stack: u64, tick: u64) -> u64 {
     unsafe {
@@ -86,11 +85,16 @@ pub extern "C" fn scheduler_on_timer_tick(current_stack: u64, tick: u64) -> u64 
 
         let previous = CURRENT_TASK;
         let next = (CURRENT_TASK + 1) % TASK_COUNT;
+        let next_stack = TASKS[next].stack_pointer;
+        if next_stack == 0 {
+            return current_stack;
+        }
+
         TASKS[previous].state = TaskState::Ready;
         TASKS[next].state = TaskState::Running;
         TASKS[next].switches = TASKS[next].switches.wrapping_add(1);
         CURRENT_TASK = next;
-        TASKS[next].stack_pointer
+        next_stack
     }
 }
 
@@ -110,24 +114,30 @@ pub fn heartbeat() -> u64 {
 extern "C" fn background_worker() -> ! {
     loop {
         BACKGROUND_HEARTBEAT.fetch_add(1, Ordering::Relaxed);
-        // Sleep until IRQ0 wakes this task. The next timer interrupt can then
-        // preempt it and resume the shell task.
         unsafe { asm!("sti", "hlt", options(nomem, nostack)) };
     }
 }
 
 unsafe fn build_initial_context(stack_start: *mut u8, entry: extern "C" fn() -> !) -> u64 {
-    let stack_top = stack_start.add(STACK_SIZE) as usize;
-    let context_start = (stack_top - CONTEXT_WORDS * core::mem::size_of::<u64>()) & !0xf;
+    let aligned_top = (stack_start.add(STACK_SIZE) as usize) & !0xf;
+
+    // A normal SysV function starts with RSP % 16 == 8 because CALL pushed a
+    // return address. IRET does not do that, so reserve a fake return slot and
+    // make the post-IRET stack match the ABI exactly. The old version entered
+    // the Rust worker with RSP % 16 == 0, which could trigger an alignment #GP;
+    // that fault during the timer switch escalated into the observed #DF.
+    let initial_rsp = aligned_top - core::mem::size_of::<u64>();
+    (initial_rsp as *mut u64).write(0);
+
+    let context_start = initial_rsp - CONTEXT_WORDS * core::mem::size_of::<u64>();
     let context = context_start as *mut u64;
 
-    // General registers in the exact order consumed by the timer ISR pops:
-    // r15..rax. Zero is a valid initial value for all of them.
-    for index in 0..15 {
+    // Layout consumed by the timer ISR: r15..rax, then RIP, CS and RFLAGS.
+    for index in 0..SAVED_REGISTER_WORDS {
         context.add(index).write(0);
     }
-    context.add(15).write(entry as *const () as u64); // RIP
-    context.add(16).write(KERNEL_CODE_SELECTOR);      // CS
-    context.add(17).write(INITIAL_RFLAGS);            // RFLAGS, IF set
+    context.add(15).write(entry as *const () as u64);
+    context.add(16).write(KERNEL_CODE_SELECTOR);
+    context.add(17).write(INITIAL_RFLAGS);
     context_start as u64
 }
