@@ -1,77 +1,69 @@
-# AlohaOS — Vibe Edition
+# AlohaOS Vibe Edition
 
-Миниатюрная операционная система на Rust (с щепоткой ассемблера там, где иначе никак).
-Пока что это загрузочный скелет: при старте на экране появляется надпись **AlohaOS**.
+Экспериментальная x86_64 операционная система на Rust с небольшими ассемблерными ISR там, где без них нельзя.
 
 ## Архитектура
 
-| Компонент     | Значение                                   |
-| ------------- | ------------------------------------------ |
-| Bootloader    | **AlohaBoot** (собственный UEFI-загрузчик) |
-| Firmware      | UEFI                                       |
-| Architecture  | x86_64                                     |
-| Language      | Rust                                       |
-| Kernel        | Hybrid                                     |
+| Компонент | Реализация |
+| --- | --- |
+| Bootloader | AlohaBoot, собственный UEFI-загрузчик |
+| Firmware | UEFI |
+| Architecture | x86_64 |
+| Language | Rust + x86_64 assembly |
+| Kernel | Hybrid, `no_std` |
 
-### Как это работает
+## Уже работает
 
-1. **AlohaBoot** (`boot/`, таргет `x86_64-unknown-uefi`) — UEFI-приложение. Оно:
-   - получает линейный фреймбуфер через GOP (Graphics Output Protocol);
-   - читает ядро `\alohaos\kernel.elf` с загрузочного тома (ESP);
-   - раскладывает LOAD-сегменты ELF по их физическим адресам;
-   - вызывает `ExitBootServices` и прыгает в точку входа ядра (ABI `sysv64`),
-     передавая указатель на `BootInfo` в `rdi`.
-2. **kernel** (`kernel/`, таргет `x86_64-unknown-none`, `no_std`) — получает
-   `BootInfo`, заливает экран фоном, рисует «AlohaOS» встроенным 8x8 битмап-шрифтом
-   и уходит в `hlt`.
-3. **common** (`common/`) — общий контракт `BootInfo` между загрузчиком и ядром.
+- AlohaBoot загружает отдельный ELF ядра и передаёт framebuffer + UEFI memory map.
+- GDT, TSS с IST-стеком, IDT и panic-экраны для CPU exceptions.
+- Физический frame allocator, собственный PML4 и higher-half direct map.
+- Reclaiming linked-list heap с рабочими `alloc`, `Box`, `Vec`, `String` и `dealloc`.
+- PIC 8259, PIT 100 Hz, PS/2 keyboard IRQ1 и lock-free ring buffer.
+- Shell с историей на 16 команд и навигацией стрелками Up/Down.
+- Команды: `help`, `clear`, `meminfo`, `uptime`, `reboot`.
 
-```
-┌─────────────┐   GOP fb + kernel ELF    ┌────────────┐
-│  AlohaBoot  │ ───────────────────────▶ │   kernel   │  →  "AlohaOS"
-│ (UEFI .efi) │   jmp entry(&BootInfo)   │ (bare ELF) │
-└─────────────┘                          └────────────┘
-```
+## Windows: сборка и запуск
 
-## Что понадобится
+Установи Rust и QEMU, затем открой PowerShell в корне репозитория:
 
-```sh
-rustup target add x86_64-unknown-uefi x86_64-unknown-none
-# + qemu-system-x86_64 и прошивка OVMF (UEFI для QEMU)
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\run-qemu.ps1
 ```
 
-## Сборка и запуск
+Скрипт сам:
 
-```sh
-# Собрать загрузчик и ядро, разложить ESP и запустить в QEMU:
-make run OVMF=/путь/к/OVMF_CODE.fd
+1. добавит Rust targets `x86_64-unknown-uefi` и `x86_64-unknown-none`;
+2. соберёт AlohaBoot и kernel;
+3. создаст `esp\EFI\BOOT\BOOTX64.EFI` и `esp\alohaos\kernel.elf`;
+4. скачает и закеширует OVMF в `firmware\OVMF_CODE.fd`, если файла ещё нет;
+5. обойдёт проблемы QEMU с кириллицей в Windows-пути через временный диск;
+6. запустит QEMU.
 
-# Только собрать артефакты:
-make boot kernel
+Только сборка:
 
-# Собрать ESP-каталог без запуска:
-make esp
+```powershell
+.\scripts\build.ps1
 ```
 
-Если `make` недоступен, то же самое руками:
+## Shell
 
-```sh
-cargo build -p alohaboot --target x86_64-unknown-uefi
-cargo build -p kernel    --target x86_64-unknown-none
-
-mkdir -p esp/EFI/BOOT esp/alohaos
-cp target/x86_64-unknown-uefi/debug/alohaboot.efi esp/EFI/BOOT/BOOTX64.EFI
-cp target/x86_64-unknown-none/debug/kernel        esp/alohaos/kernel.elf
-
-qemu-system-x86_64 \
-  -machine q35 -m 256M \
-  -drive if=pflash,format=raw,readonly=on,file=/путь/к/OVMF_CODE.fd \
-  -drive format=raw,file=fat:rw:esp
+```text
+help       список команд
+clear      очистить экран
+meminfo    физическая память и статистика heap
+uptime     время с запуска по PIT
+reboot     reset через 8042, затем chipset fallback
+Up/Down    история команд
 ```
 
-## Дорожная карта
+## Следующие этапы
 
-- [x] Загрузка и вывод сплэша «AlohaOS»
-- [ ] GDT / IDT, обработка исключений
-- [ ] Пейджинг и физический аллокатор
-- [ ] Ввод с клавиатуры, простой шелл
+- VirtIO Block driver, VFS и FAT32.
+- Preemptive round-robin scheduler и context switch.
+- Ring 3, user address spaces и syscalls.
+- ACPI shutdown и APIC.
+
+## Лицензия
+
+MIT
