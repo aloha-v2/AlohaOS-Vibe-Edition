@@ -7,7 +7,7 @@
 ## 1. Стабильность ядра
 
 - [ ] Переписать полный x86_64 context switch: GPR, RIP, RSP, RFLAGS, CR3, FS/GS base, FPU/SSE/AVX через XSAVE/XRSTOR.
-- [ ] Реализовать lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
+- [x] Реализовать lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
 - [ ] Добавить отдельный kernel stack для каждой задачи и guard page от переполнения.
 - [ ] Сделать стабильный preemptive round-robin scheduler и stress-test переключений.
 - [ ] Добавить spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
@@ -18,6 +18,13 @@
 - [ ] Создать QEMU smoke tests: boot, exceptions, heap, scheduler, disk, keyboard.
 
 **Готово, когда:** несколько задач работают час без Double Fault, утечек и зависаний.
+
+### Выполнено в рабочей ветке
+
+- COM1 logger работает без heap и пишет этапы boot/panic с severity.
+- Lifecycle хранится атомарно; поддержаны block, wake, timed sleep и exit.
+- PIT переводит Sleeping в Ready при достижении wake tick.
+- Команда `tasks` показывает все состояния и deadline пробуждения.
 
 ## 2. ACPI, APIC и современное железо
 
@@ -165,8 +172,8 @@
 
 ## Ближайшие задачи
 
-1. Реализовать полный task context и стабильный scheduler без Double Fault.
-2. Перенести shell в Ring 3 через минимальные syscalls.
-3. Построить VFS поверх VirtIO Block и FAT32.
-4. Добавить mouse input и VirtIO GPU.
-5. Только затем начинать compositor и GUI toolkit.
+1. Добавить отдельные kernel stacks и guard pages.
+2. Реализовать полный task context и стабильный scheduler без Double Fault.
+3. Перенести shell в Ring 3 через минимальные syscalls.
+4. Построить VFS поверх VirtIO Block и FAT32.
+5. Добавить mouse input и VirtIO GPU.
