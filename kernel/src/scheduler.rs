@@ -1,9 +1,10 @@
 //! Minimal preemptive round-robin scheduler for kernel threads.
 //!
-//! PIT IRQ0 saves the general-purpose context. The timer ISR gives that stack
-//! pointer to the scheduler and restores the selected task through `iretq`.
+//! PIT IRQ0 saves the general-purpose context. The first background task enters
+//! through a pure assembly trampoline, so its first `iretq` does not depend on
+//! a Rust function prologue or SysV call-frame assumptions.
 
-use core::arch::asm;
+use core::arch::global_asm;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 const TASK_COUNT: usize = 2;
@@ -49,7 +50,13 @@ static mut WORKER_STACK: KernelStack = KernelStack([0; STACK_SIZE]);
 static mut TASKS: [Task; TASK_COUNT] = [Task::EMPTY; TASK_COUNT];
 static mut CURRENT_TASK: usize = 0;
 static mut INITIALIZED: bool = false;
+
+#[no_mangle]
 static BACKGROUND_HEARTBEAT: AtomicU64 = AtomicU64::new(0);
+
+unsafe extern "C" {
+    fn scheduler_worker_entry() -> !;
+}
 
 pub fn init() {
     unsafe {
@@ -61,7 +68,7 @@ pub fn init() {
         TASKS[1] = Task {
             stack_pointer: build_initial_context(
                 core::ptr::addr_of_mut!(WORKER_STACK.0).cast::<u8>(),
-                background_worker,
+                scheduler_worker_entry,
             ),
             switches: 0,
             state: TaskState::Ready,
@@ -111,28 +118,12 @@ pub fn heartbeat() -> u64 {
     BACKGROUND_HEARTBEAT.load(Ordering::Relaxed)
 }
 
-extern "C" fn background_worker() -> ! {
-    loop {
-        BACKGROUND_HEARTBEAT.fetch_add(1, Ordering::Relaxed);
-        unsafe { asm!("sti", "hlt", options(nomem, nostack)) };
-    }
-}
-
-unsafe fn build_initial_context(stack_start: *mut u8, entry: extern "C" fn() -> !) -> u64 {
+unsafe fn build_initial_context(stack_start: *mut u8, entry: unsafe extern "C" fn() -> !) -> u64 {
     let aligned_top = (stack_start.add(STACK_SIZE) as usize) & !0xf;
-
-    // A normal SysV function starts with RSP % 16 == 8 because CALL pushed a
-    // return address. IRET does not do that, so reserve a fake return slot and
-    // make the post-IRET stack match the ABI exactly. The old version entered
-    // the Rust worker with RSP % 16 == 0, which could trigger an alignment #GP;
-    // that fault during the timer switch escalated into the observed #DF.
-    let initial_rsp = aligned_top - core::mem::size_of::<u64>();
-    (initial_rsp as *mut u64).write(0);
-
-    let context_start = initial_rsp - CONTEXT_WORDS * core::mem::size_of::<u64>();
+    let context_start = aligned_top - CONTEXT_WORDS * core::mem::size_of::<u64>();
     let context = context_start as *mut u64;
 
-    // Layout consumed by the timer ISR: r15..rax, then RIP, CS and RFLAGS.
+    // r15..rax, then the same-CPL IRET frame: RIP, CS, RFLAGS.
     for index in 0..SAVED_REGISTER_WORDS {
         context.add(index).write(0);
     }
@@ -141,3 +132,12 @@ unsafe fn build_initial_context(stack_start: *mut u8, entry: extern "C" fn() -> 
     context.add(17).write(INITIAL_RFLAGS);
     context_start as u64
 }
+
+global_asm!(r#"
+.global scheduler_worker_entry
+scheduler_worker_entry:
+    inc qword ptr [rip + BACKGROUND_HEARTBEAT]
+    sti
+    hlt
+    jmp scheduler_worker_entry
+"#);
