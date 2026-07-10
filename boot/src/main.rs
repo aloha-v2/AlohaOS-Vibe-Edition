@@ -20,6 +20,8 @@ use common::{
 use xmas_elf::program::Type as ProgramType;
 use xmas_elf::ElfFile;
 
+const PAGE_SIZE: u64 = 4096;
+
 static mut BOOT_INFO: BootInfo = BootInfo::EMPTY;
 static mut MEMORY_REGIONS: [MemoryRegion; MAX_MEMORY_REGIONS] =
     [MemoryRegion::EMPTY; MAX_MEMORY_REGIONS];
@@ -37,10 +39,7 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         let stride = mode.stride();
         let format = mode.pixel_format();
         let mut framebuffer = gop.frame_buffer();
-        (
-            framebuffer.as_mut_ptr() as u64,
-            framebuffer.size(), width, height, stride, format,
-        )
+        (framebuffer.as_mut_ptr() as u64, framebuffer.size(), width, height, stride, format)
     };
 
     let pixel_format = match uefi_pf {
@@ -72,20 +71,49 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
 
     let elf = ElfFile::new(&kernel_bytes).unwrap();
     let entry_point = elf.header.pt2.entry_point();
+
+    // PT_LOAD segments can share a physical 4 KiB page. Allocating each segment
+    // independently therefore starts failing as soon as the ELF gains another
+    // segment (liballoc triggered exactly that). Reserve one page-aligned span,
+    // zero it once, then copy every segment into its final physical address.
+    let mut load_start = u64::MAX;
+    let mut load_end = 0u64;
+    for header in elf.program_iter() {
+        if header.get_type() == Ok(ProgramType::Load) && header.mem_size() != 0 {
+            load_start = load_start.min(align_down(header.physical_addr(), PAGE_SIZE));
+            load_end = load_end.max(align_up(
+                header.physical_addr().saturating_add(header.mem_size()),
+                PAGE_SIZE,
+            ));
+        }
+    }
+    if load_start == u64::MAX || load_end <= load_start {
+        panic!("kernel ELF has no loadable image");
+    }
+
+    let load_pages = ((load_end - load_start) / PAGE_SIZE) as usize;
+    bs.allocate_pages(
+        AllocateType::Address(load_start),
+        MemoryType::LOADER_DATA,
+        load_pages,
+    ).unwrap();
+
+    unsafe { ptr::write_bytes(load_start as *mut u8, 0, (load_end - load_start) as usize) };
     for header in elf.program_iter() {
         if header.get_type() != Ok(ProgramType::Load) || header.mem_size() == 0 {
             continue;
         }
-        let physical = header.physical_addr();
-        let memory_size = header.mem_size() as usize;
         let file_size = header.file_size() as usize;
         let offset = header.offset() as usize;
-        let pages = (memory_size + 0xfff) / 0x1000;
-        bs.allocate_pages(AllocateType::Address(physical), MemoryType::LOADER_DATA, pages).unwrap();
+        if offset.checked_add(file_size).map_or(true, |end| end > kernel_bytes.len()) {
+            panic!("kernel ELF segment exceeds file");
+        }
         unsafe {
-            let destination = physical as *mut u8;
-            ptr::copy(kernel_bytes.as_ptr().add(offset), destination, file_size);
-            ptr::write_bytes(destination.add(file_size), 0, memory_size - file_size);
+            ptr::copy_nonoverlapping(
+                kernel_bytes.as_ptr().add(offset),
+                header.physical_addr() as *mut u8,
+                file_size,
+            );
         }
     }
 
@@ -129,4 +157,12 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
 
     let entry: extern "sysv64" fn(*const BootInfo) -> ! = unsafe { mem::transmute(entry_point) };
     entry(ptr::addr_of!(BOOT_INFO));
+}
+
+const fn align_down(value: u64, alignment: u64) -> u64 {
+    value & !(alignment - 1)
+}
+
+const fn align_up(value: u64, alignment: u64) -> u64 {
+    value.saturating_add(alignment - 1) & !(alignment - 1)
 }
