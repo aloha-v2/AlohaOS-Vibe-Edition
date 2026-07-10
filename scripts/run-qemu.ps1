@@ -10,21 +10,15 @@ $ProjectOvmf = Join-Path $FirmwareDir "OVMF_CODE.fd"
 $OvmfUrl = "https://raw.githubusercontent.com/retrage/edk2-nightly/master/bin/RELEASEX64_OVMF.fd"
 
 & (Join-Path $Root "scripts\build.ps1")
-
-# Keep the downloaded firmware in the project so subsequent runs are offline.
-if (-not $OvmfCode) {
-    $OvmfCode = $ProjectOvmf
-}
+if (-not $OvmfCode) { $OvmfCode = $ProjectOvmf }
 
 if (-not (Test-Path $OvmfCode)) {
     if ($OvmfCode -ne $ProjectOvmf) {
         throw "The specified OVMF firmware does not exist: $OvmfCode"
     }
-
     New-Item -ItemType Directory -Force $FirmwareDir | Out-Null
     $TemporaryFile = "$ProjectOvmf.download"
     Remove-Item $TemporaryFile -Force -ErrorAction SilentlyContinue
-
     Write-Host "OVMF is missing. Downloading it to firmware\OVMF_CODE.fd..." -ForegroundColor Cyan
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -32,49 +26,36 @@ if (-not (Test-Path $OvmfCode)) {
         $Client.Headers.Add("User-Agent", "AlohaOS-Build")
         $Client.DownloadFile($OvmfUrl, $TemporaryFile)
         $Client.Dispose()
-
         if (-not (Test-Path $TemporaryFile) -or (Get-Item $TemporaryFile).Length -lt 1MB) {
             throw "Downloaded firmware is missing or unexpectedly small."
         }
-
         Move-Item $TemporaryFile $ProjectOvmf -Force
         Write-Host "OVMF downloaded: $ProjectOvmf" -ForegroundColor Green
     }
     catch {
         Remove-Item $TemporaryFile -Force -ErrorAction SilentlyContinue
-        throw "Could not download OVMF from $OvmfUrl. $($_.Exception.Message)"
+        throw "Could not download OVMF. $($_.Exception.Message)"
     }
 }
 else {
     Write-Host "Using cached OVMF: $OvmfCode" -ForegroundColor DarkGray
 }
 
-# QEMU for Windows can misread Cyrillic paths. Map the repository to a free
-# drive letter so QEMU only receives short ASCII paths such as Z:\esp.
 $MappedDrive = $null
 foreach ($Letter in @("Z", "Y", "X", "W", "V", "U", "T", "S", "R", "Q", "P")) {
-    if (-not (Test-Path "${Letter}:\")) {
-        $MappedDrive = "${Letter}:"
-        break
-    }
+    if (-not (Test-Path "${Letter}:\")) { $MappedDrive = "${Letter}:"; break }
 }
-if (-not $MappedDrive) {
-    throw "No free drive letter is available for the temporary QEMU path mapping."
-}
+if (-not $MappedDrive) { throw "No free drive letter is available." }
 
 & subst.exe $MappedDrive $Root
-if ($LASTEXITCODE -ne 0) {
-    throw "Could not map $Root to $MappedDrive"
-}
+if ($LASTEXITCODE -ne 0) { throw "Could not map $Root to $MappedDrive" }
 
 try {
     $QemuEsp = "$MappedDrive\esp"
-    if ($OvmfCode -eq $ProjectOvmf) {
-        $QemuOvmf = "$MappedDrive\firmware\OVMF_CODE.fd"
-    }
-    else {
-        $QemuOvmf = $OvmfCode
-    }
+    $QemuOvmf = if ($OvmfCode -eq $ProjectOvmf) {
+        "$MappedDrive\firmware\OVMF_CODE.fd"
+    } else { $OvmfCode }
+    $QemuLog = "$MappedDrive\qemu.log"
 
     Write-Host "Starting QEMU via $MappedDrive (Unicode-safe path)..." -ForegroundColor Cyan
     & $Qemu `
@@ -83,11 +64,12 @@ try {
         -bios $QemuOvmf `
         -drive "format=raw,file=fat:rw:$QemuEsp" `
         -net none `
-        -no-reboot
+        -no-reboot `
+        -no-shutdown `
+        -d "guest_errors,cpu_reset" `
+        -D $QemuLog
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "QEMU exited with code $LASTEXITCODE"
-    }
+    if ($LASTEXITCODE -ne 0) { throw "QEMU exited with code $LASTEXITCODE" }
 }
 finally {
     & subst.exe $MappedDrive /D | Out-Null

@@ -5,8 +5,6 @@ use core::mem::size_of;
 use core::ptr::addr_of;
 
 const KERNEL_CODE_SELECTOR: u16 = 0x08;
-const KERNEL_DATA_SELECTOR: u16 = 0x10;
-const TSS_SELECTOR: u16 = 0x18;
 const DOUBLE_FAULT_IST_INDEX: u8 = 1;
 
 #[repr(C, packed)]
@@ -41,16 +39,17 @@ struct GdtPointer {
     base: u64,
 }
 
+#[repr(C, align(16))]
+struct AlignedGdt([u64; 5]);
+
 static mut DOUBLE_FAULT_STACK: InterruptStack = InterruptStack([0; 20 * 1024]);
 static mut TSS: TaskStateSegment = TaskStateSegment::ZERO;
-// TSS descriptors occupy two consecutive GDT slots.
-static mut GDT: [u64; 5] = [0; 5];
+static mut GDT: AlignedGdt = AlignedGdt([0; 5]);
 
 pub fn init() {
     unsafe {
-        let stack_start = addr_of!(DOUBLE_FAULT_STACK) as u64;
-        let stack_top = stack_start + size_of::<InterruptStack>() as u64;
-
+        let stack_top = addr_of!(DOUBLE_FAULT_STACK) as u64
+            + size_of::<InterruptStack>() as u64;
         let mut ist = [0u64; 7];
         ist[(DOUBLE_FAULT_IST_INDEX - 1) as usize] = stack_top;
         TSS = TaskStateSegment {
@@ -58,51 +57,43 @@ pub fn init() {
             ..TaskStateSegment::ZERO
         };
 
-        GDT[0] = 0;
-        GDT[1] = 0x00af_9a00_0000_ffff; // 64-bit ring-0 code
-        GDT[2] = 0x00cf_9200_0000_ffff; // ring-0 data
+        GDT.0[0] = 0;
+        GDT.0[1] = 0x00af_9a00_0000_ffff;
+        GDT.0[2] = 0x00cf_9200_0000_ffff;
 
         let base = addr_of!(TSS) as u64;
         let limit = (size_of::<TaskStateSegment>() - 1) as u64;
-        GDT[3] = (limit & 0xffff)
+        GDT.0[3] = (limit & 0xffff)
             | ((base & 0x00ff_ffff) << 16)
-            | (0x89u64 << 40) // present, available 64-bit TSS
+            | (0x89u64 << 40)
             | (((limit >> 16) & 0x0f) << 48)
             | (((base >> 24) & 0xff) << 56);
-        GDT[4] = base >> 32;
+        GDT.0[4] = base >> 32;
 
         let pointer = GdtPointer {
-            limit: (size_of::<[u64; 5]>() - 1) as u16,
+            limit: (size_of::<AlignedGdt>() - 1) as u16,
             base: addr_of!(GDT) as u64,
         };
         asm!("lgdt [{}]", in(reg) &pointer, options(readonly, nostack));
 
-        // A far return reloads CS. The remaining segment registers can be
-        // loaded directly, then LTR activates the TSS and its IST entries.
+        // Use immediate selectors. Passing the code selector through an
+        // arbitrary register made the far-return sequence fragile under LTO.
         asm!(
-            "push {selector}",
+            "push 0x08",
             "lea rax, [rip + 2f]",
             "push rax",
             "retfq",
             "2:",
-            selector = in(reg) KERNEL_CODE_SELECTOR as u64,
-            out("rax") _,
-        );
-        asm!(
-            "mov ax, {selector:x}",
+            "mov ax, 0x10",
             "mov ds, ax",
             "mov es, ax",
             "mov ss, ax",
-            selector = in(reg) KERNEL_DATA_SELECTOR,
-            out("ax") _,
-            options(nostack, preserves_flags),
-        );
-        asm!(
-            "mov ax, {selector:x}",
+            "xor eax, eax",
+            "mov fs, ax",
+            "mov gs, ax",
+            "mov ax, 0x18",
             "ltr ax",
-            selector = in(reg) TSS_SELECTOR,
-            out("ax") _,
-            options(nostack, preserves_flags),
+            out("rax") _,
         );
     }
 }
