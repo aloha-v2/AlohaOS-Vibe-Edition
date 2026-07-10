@@ -1,53 +1,41 @@
 # AlohaOS Vibe Edition
 
-Экспериментальная x86_64 ОС на Rust: собственный AlohaBoot UEFI bootloader и hybrid `no_std` kernel.
+Экспериментальная x86_64 ОС на Rust: AlohaBoot UEFI bootloader и `no_std` kernel.
 
 ## Работает сейчас
 
-- UEFI ELF loader, framebuffer и UEFI memory map handoff.
-- GDT, TSS, IDT, ISR и kernel panic screen.
-- Physical frame allocator, 4-level paging и higher-half direct map.
-- Reclaiming linked-list heap, `Box`, `Vec`, `String` и `dealloc`.
-- PIC 8259, PIT 100 Hz, uptime и PS/2 keyboard.
-- Task lifecycle: Ready, Running, Blocked, Sleeping и Dead.
-- Отдельные 16 KiB kernel stacks с unmapped 4 KiB guard pages.
-- Allocation-free COM1 log с DEBUG, INFO, ERROR и panic output.
-- Legacy VirtIO Block и read-only FAT32: `ls /`, `cat hello.txt`.
-- Shell: history, `help`, `clear`, `meminfo`, `uptime`, `tasks`, `ls`, `cat`, `reboot`.
-- CI проверяет release-сборку AlohaBoot и kernel.
+- UEFI ELF loader, framebuffer и memory map handoff.
+- GDT, TSS, IDT, ISR и panic screen.
+- Physical allocator, paging, higher-half direct map и reclaiming heap.
+- PIC, PIT 100 Hz, uptime, PS/2 keyboard, VirtIO Block и read-only FAT32.
+- Shell и allocation-free COM1 logging.
+- Task lifecycle и guarded kernel stack для background worker.
+- CI build и headless QEMU smoke test.
 
-## Ветка M0 context switch
+## M0 context-switch branch
 
-В `brain/m0-context-switch` реализован preemptive round-robin для двух kernel tasks. Timer frame переключает GPR, RIP, RSP и RFLAGS; task context сохраняет CR3, FS/GS base и x87/SSE/AVX через XSAVE/XRSTOR. Shell и worker работают на отдельных guarded stacks.
+`brain/m0-context-switch` содержит preemptive two-task round-robin. Timer frame сохраняет GPR/RIP/RSP/RFLAGS, extended context хранит CR3, FS/GS base и x87/SSE/AVX через XSAVE/XRSTOR. Bootstrap shell пока остаётся на проверенном boot stack; background task использует отдельный guarded stack. Это осознанный staging шаг, чтобы не смешивать миграцию bootstrap stack с проверкой переключателя.
 
-Это low-level изменение пока не готово к merge: сначала нужны зелёный CI и runtime-проверка в QEMU. Команда `tasks` должна показывать растущие `CONTEXT SWITCHES` у обеих задач и `WORKER HEARTBEAT`.
-
-Подробный порядок работ и статусы: [TODO.md](TODO.md).
+Команда `tasks` показывает context switches и worker heartbeat. До merge обязательны зелёный QEMU smoke test и ручная проверка.
 
 ## Windows
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
+git fetch origin
+git switch brain/m0-context-switch
+git pull
 .\scripts\run-qemu.ps1
 ```
 
-## Проверка
-
-```text
-tasks
-uptime
-ls /
-cat hello.txt
-meminfo
-```
+В shell: `tasks`, `uptime`, `ls /`, `cat hello.txt`, `meminfo`.
 
 ## Дальше
 
-- QEMU stress-test round-robin без Double Fault.
-- IRQ-safe synchronization primitives.
-- Освобождение физических frames.
+- Стабилизировать round-robin без Double Fault.
+- Мигрировать bootstrap task на guarded stack отдельным изменением.
+- Добавить IRQ-safe synchronization и frame deallocation.
 - Ring 3, syscalls и user shell.
 
 ## Лицензия
 
-PolyForm Noncommercial License 1.0.0: только некоммерческое использование, изменение и распространение. См. [LICENSE.md](LICENSE.md).
+PolyForm Noncommercial License 1.0.0. См. [LICENSE.md](LICENSE.md).
