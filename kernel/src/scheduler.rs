@@ -1,16 +1,256 @@
-//! Scheduler staging layer with complete lifecycle diagnostics.
+//! Two-task round-robin scheduler with an explicit runtime safety gate.
 //!
-//! Extended context structures remain available for development, but cross-task
-//! switching is gated off after hardware testing exposed a double fault. The
-//! timer keeps the stable bootstrap task running while we redesign the low-level
-//! trampoline and add a dedicated interrupt stack for scheduler transitions.
+//! Context infrastructure is initialized at boot, but cross-task preemption is
+//! disabled until the operator runs `sched on`. This keeps the known-good shell
+//! path unchanged while allowing controlled hardware validation.
 
-use core::sync::atomic::{AtomicU64,AtomicU8,Ordering};
-const TASK_COUNT:usize=2;const NO_WAKE_DEADLINE:u64=u64::MAX;
-static PREEMPTION_TICKS:AtomicU64=AtomicU64::new(0);static STATES:[AtomicU8;TASK_COUNT]=[AtomicU8::new(TaskState::Running as u8),AtomicU8::new(TaskState::Blocked as u8)];static WAKE_TICKS:[AtomicU64;TASK_COUNT]=[AtomicU64::new(NO_WAKE_DEADLINE),AtomicU64::new(NO_WAKE_DEADLINE)];static SWITCHES:[AtomicU64;TASK_COUNT]=[AtomicU64::new(0),AtomicU64::new(0)];
-#[derive(Clone,Copy,Debug,PartialEq,Eq)]#[repr(u8)]pub enum TaskState{Ready=0,Running=1,Blocked=2,Sleeping=3,Dead=4}impl TaskState{fn from_raw(v:u8)->Self{match v{0=>Self::Ready,1=>Self::Running,2=>Self::Blocked,3=>Self::Sleeping,4=>Self::Dead,_=>Self::Dead}}}
-#[derive(Clone,Copy)]pub struct TaskSnapshot{pub id:usize,pub state:TaskState,pub switches:u64,pub wake_tick:Option<u64>}
-pub fn init(){PREEMPTION_TICKS.store(0,Ordering::Relaxed);STATES[0].store(TaskState::Running as u8,Ordering::Release);STATES[1].store(TaskState::Blocked as u8,Ordering::Release);for t in 0..TASK_COUNT{WAKE_TICKS[t].store(NO_WAKE_DEADLINE,Ordering::Relaxed);SWITCHES[t].store(0,Ordering::Relaxed)}}
-pub fn state(t:usize)->Option<TaskState>{STATES.get(t).map(|v|TaskState::from_raw(v.load(Ordering::Acquire)))}pub fn wake(t:usize)->bool{transition(t,TaskState::Blocked,TaskState::Ready)||transition(t,TaskState::Sleeping,TaskState::Ready)}pub fn block(t:usize)->bool{if let Some(v)=WAKE_TICKS.get(t){v.store(NO_WAKE_DEADLINE,Ordering::Relaxed)}transition(t,TaskState::Ready,TaskState::Blocked)||transition(t,TaskState::Running,TaskState::Blocked)}pub fn sleep_until(t:usize,w:u64)->bool{let Some(d)=WAKE_TICKS.get(t)else{return false};let c=transition(t,TaskState::Ready,TaskState::Sleeping)||transition(t,TaskState::Running,TaskState::Sleeping);if c{d.store(w,Ordering::Release)}c}pub fn exit(t:usize)->bool{let Some(s)=STATES.get(t)else{return false};loop{let c=TaskState::from_raw(s.load(Ordering::Acquire));if c==TaskState::Dead{return false}if s.compare_exchange_weak(c as u8,TaskState::Dead as u8,Ordering::AcqRel,Ordering::Acquire).is_ok(){WAKE_TICKS[t].store(NO_WAKE_DEADLINE,Ordering::Release);return true}}}fn transition(t:usize,f:TaskState,n:TaskState)->bool{let Some(s)=STATES.get(t)else{return false};s.compare_exchange(f as u8,n as u8,Ordering::AcqRel,Ordering::Acquire).is_ok()}
-#[no_mangle]pub extern "C" fn scheduler_on_timer_tick(stack:u64,tick:u64)->u64{PREEMPTION_TICKS.fetch_add(1,Ordering::Relaxed);SWITCHES[0].fetch_add(1,Ordering::Relaxed);for t in 0..TASK_COUNT{if state(t)==Some(TaskState::Sleeping)&&WAKE_TICKS[t].load(Ordering::Acquire)<=tick{let _=transition(t,TaskState::Sleeping,TaskState::Ready);WAKE_TICKS[t].store(NO_WAKE_DEADLINE,Ordering::Release)}}stack}
-pub fn snapshots()->[TaskSnapshot;TASK_COUNT]{core::array::from_fn(|id|{let d=WAKE_TICKS[id].load(Ordering::Acquire);TaskSnapshot{id,state:state(id).unwrap_or(TaskState::Dead),switches:SWITCHES[id].load(Ordering::Relaxed),wake_tick:(d!=NO_WAKE_DEADLINE).then_some(d)}})}pub fn heartbeat()->u64{PREEMPTION_TICKS.load(Ordering::Relaxed)}pub fn worker_heartbeat()->u64{0}pub fn context_switching_ready()->bool{false}
+use core::arch::asm;
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+use crate::{serial, task_context, task_stacks};
+
+const TASK_COUNT: usize = 2;
+const NO_WAKE_DEADLINE: u64 = u64::MAX;
+const KERNEL_CODE_SELECTOR: u64 = 0x08;
+const KERNEL_DATA_SELECTOR: u64 = 0x10;
+
+static PREEMPTION_TICKS: AtomicU64 = AtomicU64::new(0);
+static CURRENT: AtomicUsize = AtomicUsize::new(0);
+static PREEMPTION_ENABLED: AtomicBool = AtomicBool::new(false);
+static STATES: [AtomicU8; TASK_COUNT] = [
+    AtomicU8::new(TaskState::Running as u8),
+    AtomicU8::new(TaskState::Blocked as u8),
+];
+static WAKE_TICKS: [AtomicU64; TASK_COUNT] = [
+    AtomicU64::new(NO_WAKE_DEADLINE),
+    AtomicU64::new(NO_WAKE_DEADLINE),
+];
+static SWITCHES: [AtomicU64; TASK_COUNT] = [AtomicU64::new(0), AtomicU64::new(0)];
+static WORKER_HEARTBEAT: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TaskState {
+    Ready = 0,
+    Running = 1,
+    Blocked = 2,
+    Sleeping = 3,
+    Dead = 4,
+}
+
+impl TaskState {
+    fn from_raw(value: u8) -> Self {
+        match value {
+            0 => Self::Ready,
+            1 => Self::Running,
+            2 => Self::Blocked,
+            3 => Self::Sleeping,
+            4 => Self::Dead,
+            _ => Self::Dead,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct TaskSnapshot {
+    pub id: usize,
+    pub state: TaskState,
+    pub switches: u64,
+    pub wake_tick: Option<u64>,
+}
+
+pub fn init() {
+    PREEMPTION_TICKS.store(0, Ordering::Relaxed);
+    CURRENT.store(0, Ordering::Relaxed);
+    PREEMPTION_ENABLED.store(false, Ordering::Release);
+    WORKER_HEARTBEAT.store(0, Ordering::Relaxed);
+    STATES[0].store(TaskState::Running as u8, Ordering::Release);
+    STATES[1].store(TaskState::Blocked as u8, Ordering::Release);
+    for task in 0..TASK_COUNT {
+        WAKE_TICKS[task].store(NO_WAKE_DEADLINE, Ordering::Relaxed);
+        SWITCHES[task].store(0, Ordering::Relaxed);
+    }
+
+    if !task_context::init() {
+        serial::error(format_args!("scheduler: context initialization failed"));
+        return;
+    }
+    let Some(stack_top) = task_stacks::stack_top(1) else {
+        serial::error(format_args!("scheduler: worker stack unavailable"));
+        return;
+    };
+    let prepared = unsafe {
+        task_context::prepare_kernel_task(
+            1,
+            stack_top,
+            worker_task as *const () as u64,
+            task_returned as *const () as u64,
+            KERNEL_CODE_SELECTOR,
+            KERNEL_DATA_SELECTOR,
+        )
+    };
+    if prepared {
+        STATES[1].store(TaskState::Ready as u8, Ordering::Release);
+        serial::info(format_args!("scheduler: worker ready, preemption gated"));
+    } else {
+        serial::error(format_args!("scheduler: worker frame unavailable"));
+    }
+}
+
+extern "C" fn worker_task() -> ! {
+    loop {
+        WORKER_HEARTBEAT.fetch_add(1, Ordering::Relaxed);
+        unsafe { asm!("sti", "hlt", options(nomem, nostack)) };
+    }
+}
+
+extern "C" fn task_returned() -> ! {
+    PREEMPTION_ENABLED.store(false, Ordering::Release);
+    let _ = exit(CURRENT.load(Ordering::Acquire));
+    loop {
+        unsafe { asm!("cli", "hlt", options(nomem, nostack)) };
+    }
+}
+
+pub fn state(task: usize) -> Option<TaskState> {
+    STATES
+        .get(task)
+        .map(|value| TaskState::from_raw(value.load(Ordering::Acquire)))
+}
+
+pub fn wake(task: usize) -> bool {
+    transition(task, TaskState::Blocked, TaskState::Ready)
+        || transition(task, TaskState::Sleeping, TaskState::Ready)
+}
+
+pub fn block(task: usize) -> bool {
+    if let Some(value) = WAKE_TICKS.get(task) {
+        value.store(NO_WAKE_DEADLINE, Ordering::Relaxed);
+    }
+    transition(task, TaskState::Ready, TaskState::Blocked)
+        || transition(task, TaskState::Running, TaskState::Blocked)
+}
+
+pub fn sleep_until(task: usize, wake_tick: u64) -> bool {
+    let Some(deadline) = WAKE_TICKS.get(task) else { return false };
+    let changed = transition(task, TaskState::Ready, TaskState::Sleeping)
+        || transition(task, TaskState::Running, TaskState::Sleeping);
+    if changed {
+        deadline.store(wake_tick, Ordering::Release);
+    }
+    changed
+}
+
+pub fn exit(task: usize) -> bool {
+    let Some(slot) = STATES.get(task) else { return false };
+    loop {
+        let current = TaskState::from_raw(slot.load(Ordering::Acquire));
+        if current == TaskState::Dead {
+            return false;
+        }
+        if slot
+            .compare_exchange_weak(
+                current as u8,
+                TaskState::Dead as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            WAKE_TICKS[task].store(NO_WAKE_DEADLINE, Ordering::Release);
+            return true;
+        }
+    }
+}
+
+fn transition(task: usize, from: TaskState, to: TaskState) -> bool {
+    let Some(slot) = STATES.get(task) else { return false };
+    slot.compare_exchange(
+        from as u8,
+        to as u8,
+        Ordering::AcqRel,
+        Ordering::Acquire,
+    )
+    .is_ok()
+}
+
+/// The shell calls this from task 0. Disabling from another task would strand
+/// the shell, so the gate deliberately rejects that transition.
+pub fn set_preemption(enabled: bool) -> bool {
+    if CURRENT.load(Ordering::Acquire) != 0 {
+        return false;
+    }
+    if enabled {
+        if !task_context::is_ready() || state(1) != Some(TaskState::Ready) {
+            return false;
+        }
+        PREEMPTION_ENABLED.store(true, Ordering::Release);
+    } else {
+        PREEMPTION_ENABLED.store(false, Ordering::Release);
+    }
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn scheduler_on_timer_tick(stack: u64, tick: u64) -> u64 {
+    PREEMPTION_TICKS.fetch_add(1, Ordering::Relaxed);
+    for task in 0..TASK_COUNT {
+        if state(task) == Some(TaskState::Sleeping)
+            && WAKE_TICKS[task].load(Ordering::Acquire) <= tick
+        {
+            let _ = transition(task, TaskState::Sleeping, TaskState::Ready);
+            WAKE_TICKS[task].store(NO_WAKE_DEADLINE, Ordering::Release);
+        }
+    }
+
+    if !PREEMPTION_ENABLED.load(Ordering::Acquire) {
+        return stack;
+    }
+
+    let current = CURRENT.load(Ordering::Relaxed);
+    let mut next = current;
+    for offset in 1..=TASK_COUNT {
+        let candidate = (current + offset) % TASK_COUNT;
+        if matches!(state(candidate), Some(TaskState::Ready) | Some(TaskState::Running)) {
+            next = candidate;
+            break;
+        }
+    }
+    if next == current {
+        return stack;
+    }
+
+    if state(current) == Some(TaskState::Running) {
+        let _ = transition(current, TaskState::Running, TaskState::Ready);
+    }
+    if state(next) == Some(TaskState::Ready) {
+        let _ = transition(next, TaskState::Ready, TaskState::Running);
+    }
+    CURRENT.store(next, Ordering::Release);
+    SWITCHES[next].fetch_add(1, Ordering::Relaxed);
+
+    unsafe { task_context::switch(current, next, stack) }
+}
+
+pub fn snapshots() -> [TaskSnapshot; TASK_COUNT] {
+    core::array::from_fn(|id| {
+        let deadline = WAKE_TICKS[id].load(Ordering::Acquire);
+        TaskSnapshot {
+            id,
+            state: state(id).unwrap_or(TaskState::Dead),
+            switches: SWITCHES[id].load(Ordering::Relaxed),
+            wake_tick: (deadline != NO_WAKE_DEADLINE).then_some(deadline),
+        }
+    })
+}
+
+pub fn heartbeat() -> u64 {
+    PREEMPTION_TICKS.load(Ordering::Relaxed)
+}
+
+pub fn worker_heartbeat() -> u64 {
+    WORKER_HEARTBEAT.load(Ordering::Relaxed)
+}
+
+pub fn context_switching_ready() -> bool {
+    PREEMPTION_ENABLED.load(Ordering::Acquire)
+}

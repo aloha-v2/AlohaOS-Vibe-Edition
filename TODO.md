@@ -5,10 +5,11 @@
 - [ ] Полный x86_64 context switch: XSAVE/CR3/FS/GS prototype gated off до hardware stress-test.
 - [x] Lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
 - [x] Guarded kernel stack infrastructure.
-- [ ] Preemptive round-robin и часовой stress-test.
+- [ ] Preemptive round-robin и часовой stress-test; runtime gate реализован, hardware test впереди.
 - [x] Dedicated scheduler/timer IST stack, проверен на Windows/QEMU.
-- [x] Assembly-only extended-context trampoline (CR3, FS/GS, XSAVE/XRSTOR), пока gated off.
-- [x] Persistent per-task GPR/IRET frames для переключения с timer IST, пока gated off.
+- [x] Assembly-only extended-context trampoline (CR3, FS/GS, XSAVE/XRSTOR).
+- [x] Persistent per-task GPR/IRET frames для переключения с timer IST.
+- [x] Runtime gate `sched on|off`, по умолчанию выключен.
 - [ ] Spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
 - [ ] Убрать `static mut` из горячих подсистем.
 - [ ] Освобождение физических фреймов.
@@ -41,7 +42,7 @@
 
 ## Ближайшие задачи
 
-1. Round-robin за runtime gate.
-2. Hardware stress-test без Double Fault.
+1. Hardware smoke: `sched on`, `tasks`, `ls /`, `cat hello.txt`.
+2. Часовой scheduler stress-test без Double Fault.
 3. IRQ-safe synchronization.
 4. Physical frame deallocation.
