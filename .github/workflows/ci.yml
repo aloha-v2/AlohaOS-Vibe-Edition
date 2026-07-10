@@ -29,13 +29,13 @@ jobs:
       - name: Boot for 15 seconds
         shell: bash
         run: |
-          for candidate in /usr/share/OVMF/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE_2M.fd; do
-            if [ -f "$candidate" ]; then OVMF="$candidate"; break; fi
-          done
+          OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
           test -n "$OVMF"
+          echo "Using OVMF: $OVMF ($(stat -c%s "$OVMF") bytes)"
           set +e
           timeout 15s qemu-system-x86_64 \
-            -machine q35 -m 256M -bios "$OVMF" \
+            -machine q35 -m 256M \
+            -drive "if=pflash,format=raw,readonly=on,file=$OVMF" \
             -drive "format=raw,file=fat:rw:esp" \
             -display none -monitor none -serial file:serial.log \
             -net none -no-reboot >qemu.log 2>&1
