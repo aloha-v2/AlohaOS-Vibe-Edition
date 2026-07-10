@@ -2,15 +2,17 @@
 
 ## 1. Стабильность ядра
 
-- [ ] Полный x86_64 context switch: hardware smoke пройден, часовой stress-test впереди.
+- [ ] Полный x86_64 context switch: hardware smoke и автоматический 60s stress пройдены, часовой прогон впереди.
 - [x] Lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
 - [x] Guarded kernel stack infrastructure.
-- [ ] Preemptive round-robin и часовой stress-test; runtime gate и hardware smoke готовы.
+- [ ] Preemptive round-robin и часовой stress-test; runtime gate, hardware smoke и 60s CI stress готовы.
 - [x] Dedicated scheduler/timer IST stack, проверен на Windows/QEMU.
 - [x] Assembly-only extended-context trampoline (CR3, FS/GS, XSAVE/XRSTOR).
 - [x] Persistent per-task GPR/IRET frames для переключения с timer IST.
 - [x] Runtime gate `sched on|off`, по умолчанию выключен.
 - [x] Hardware smoke: обе задачи 588 switches, worker heartbeat 588, shell и FAT32 живы.
+- [x] Автоматический 60-секундный QEMU scheduler stress.
+- [ ] Ручной workflow `Scheduler one-hour stress` должен пройти 3600 секунд.
 - [ ] Spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
 - [ ] Убрать `static mut` из горячих подсистем.
 - [ ] Освобождение физических фреймов.
@@ -39,12 +41,13 @@
 - Shell загружается без panic.
 - Timer IST стабилен, scheduling ticks растут.
 - Gated round-robin: task 0 и task 1 по 588 switches, worker heartbeat 588.
+- Автоматический 60s stress проходит без Double Fault.
 - VirtIO Block и FAT32 online после включения scheduler.
 - `ls /` видит `HELLO.TXT`, `cat hello.txt` читает файл.
 
 ## Ближайшие задачи
 
-1. Автоматизированный scheduler stress-test.
-2. Часовой прогон без Double Fault.
+1. Запустить `Scheduler one-hour stress` через GitHub Actions.
+2. После зелёного часа включить round-robin по умолчанию.
 3. IRQ-safe synchronization.
 4. Physical frame deallocation.

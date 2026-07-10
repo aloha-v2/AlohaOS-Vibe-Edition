@@ -1,0 +1,39 @@
+name: Scheduler one-hour stress
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scheduler-hour:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build stress kernel and FAT32 disk
+        run: |
+          make esp PROFILE=release KERNEL_FEATURES=scheduler-stress
+          mkdir -p disk
+          python3 scripts/create-fat32.py disk/aloha-fat32.img
+      - name: Run scheduler for one hour
+        shell: bash
+        run: |
+          OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
+          set +e
+          timeout 3600s qemu-system-x86_64 -machine q35 -cpu max -m 256M \
+            -drive "if=pflash,format=raw,readonly=on,file=$OVMF" \
+            -drive "format=raw,file=fat:rw:esp" \
+            -drive "if=none,id=aloha-disk,format=raw,file=disk/aloha-fat32.img" \
+            -device "virtio-blk-pci,drive=aloha-disk,disable-modern=on" \
+            -display none -monitor none -serial file:stress-hour.log -net none -no-reboot
+          status=$?
+          set -e
+          tail -n 200 stress-hour.log
+          test "$status" -eq 124
+          grep -q "scheduler-stress: preemption enabled" stress-hour.log
+          grep -q "scheduler-stress: worker heartbeat 100" stress-hour.log
+          grep -q "storage: virtio_blk=true, fat32=true" stress-hour.log
+          ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' stress-hour.log
