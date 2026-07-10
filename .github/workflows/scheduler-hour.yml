@@ -1,6 +1,9 @@
 name: Scheduler one-hour stress
 on:
   workflow_dispatch:
+  push:
+    branches: ["brain/m0-context-switch"]
+    paths: [".github/workflows/scheduler-hour.yml"]
 permissions:
   contents: read
 jobs:
