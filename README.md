@@ -14,9 +14,9 @@
 
 ## M0 context-switch branch
 
-`brain/m0-context-switch` содержит preemptive two-task round-robin. Timer frame сохраняет GPR/RIP/RSP/RFLAGS, extended context хранит CR3, FS/GS base и x87/SSE/AVX через XSAVE/XRSTOR. Bootstrap shell пока остаётся на проверенном boot stack; background task использует отдельный guarded stack. Это осознанный staging шаг, чтобы не смешивать миграцию bootstrap stack с проверкой переключателя.
+`brain/m0-context-switch` содержит preemptive two-task round-robin. Timer frame сохраняет GPR/RIP/RSP/RFLAGS, extended context хранит CR3, FS/GS base и x87/SSE/AVX через XSAVE/XRSTOR. Bootstrap shell остаётся на проверенном boot stack; background task использует отдельный guarded stack с unmapped lower guard и mapped ABI headroom.
 
-Команда `tasks` показывает context switches и worker heartbeat. До merge обязательны зелёный QEMU smoke test и ручная проверка.
+Автоматические release build и QEMU smoke test проходят. Перед merge нужна последняя ручная проверка: команда `tasks` должна показать `XSAVE CONTEXT SWITCH ACTIVE`, растущие context switches у обеих задач и worker heartbeat больше нуля.
 
 ## Windows
 
@@ -31,9 +31,9 @@ git pull
 
 ## Дальше
 
-- Стабилизировать round-robin без Double Fault.
-- Мигрировать bootstrap task на guarded stack отдельным изменением.
-- Добавить IRQ-safe synchronization и frame deallocation.
+- Ручная проверка round-robin, затем merge PR #4.
+- Длительный scheduler stress test.
+- IRQ-safe synchronization и frame deallocation.
 - Ring 3, syscalls и user shell.
 
 ## Лицензия
