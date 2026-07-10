@@ -1,4 +1,8 @@
-//! Minimal single-core IRQ-safe synchronization primitives.
+//! Small IRQ-safe synchronization primitives for the single-core kernel.
+//!
+//! Lock acquisition saves RFLAGS and disables interrupts before spinning. This
+//! prevents a same-CPU interrupt handler from deadlocking on a lock held by the
+//! code it interrupted. Dropping the guard restores the caller's IF state.
 
 use core::arch::asm;
 use core::cell::UnsafeCell;
@@ -14,6 +18,7 @@ pub struct IrqSpinLock<T> {
 }
 
 unsafe impl<T: Send> Sync for IrqSpinLock<T> {}
+unsafe impl<T: Send> Send for IrqSpinLock<T> {}
 
 impl<T> IrqSpinLock<T> {
     pub const fn new(value: T) -> Self {
@@ -21,22 +26,21 @@ impl<T> IrqSpinLock<T> {
     }
 
     pub fn lock(&self) -> IrqSpinLockGuard<'_, T> {
-        let flags = disable_interrupts();
-        while self.locked.compare_exchange_weak(
-            false,
-            true,
-            Ordering::Acquire,
-            Ordering::Relaxed,
-        ).is_err() {
+        let interrupts_were_enabled = save_and_disable_interrupts();
+        while self
+            .locked
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
             spin_loop();
         }
-        IrqSpinLockGuard { lock: self, restore_interrupts: flags & RFLAGS_INTERRUPT_ENABLE != 0 }
+        IrqSpinLockGuard { lock: self, interrupts_were_enabled }
     }
 }
 
 pub struct IrqSpinLockGuard<'a, T> {
     lock: &'a IrqSpinLock<T>,
-    restore_interrupts: bool,
+    interrupts_were_enabled: bool,
 }
 
 impl<T> Deref for IrqSpinLockGuard<'_, T> {
@@ -51,23 +55,18 @@ impl<T> DerefMut for IrqSpinLockGuard<'_, T> {
 impl<T> Drop for IrqSpinLockGuard<'_, T> {
     fn drop(&mut self) {
         self.lock.locked.store(false, Ordering::Release);
-        if self.restore_interrupts {
+        if self.interrupts_were_enabled {
             unsafe { asm!("sti", options(nomem, nostack, preserves_flags)) };
         }
     }
 }
 
 #[inline]
-fn disable_interrupts() -> u64 {
+fn save_and_disable_interrupts() -> bool {
     let flags: u64;
     unsafe {
-        asm!(
-            "pushfq",
-            "pop {}",
-            "cli",
-            out(reg) flags,
-            options(nomem, preserves_flags),
-        );
+        asm!("pushfq", "pop {}", out(reg) flags, options(nomem, preserves_flags));
+        asm!("cli", options(nomem, nostack, preserves_flags));
     }
-    flags
+    flags & RFLAGS_INTERRUPT_ENABLE != 0
 }
