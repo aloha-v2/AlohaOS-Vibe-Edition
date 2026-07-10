@@ -1,0 +1,13 @@
+[package]
+name = "aloha-boot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aloha-boot"
+path = "src/main.rs"
+
+[dependencies]
+aloha-kernel = { path = "../kernel" }
+uefi = { version = "0.36.1", features = ["panic_handler"] }
