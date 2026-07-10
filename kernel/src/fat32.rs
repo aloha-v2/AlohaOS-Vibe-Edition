@@ -31,7 +31,11 @@ pub fn init() -> bool {
     }
     unsafe {
         VOLUME = Some(Volume {
-            sectors_per_cluster, reserved_sectors, fat_count, sectors_per_fat, root_cluster,
+            sectors_per_cluster,
+            reserved_sectors,
+            fat_count,
+            sectors_per_fat,
+            root_cluster,
             fat_start: reserved_sectors,
             data_start: reserved_sectors + fat_count * sectors_per_fat,
         });
@@ -42,9 +46,12 @@ pub fn init() -> bool {
 pub fn is_mounted() -> bool { unsafe { VOLUME.is_some() } }
 
 pub fn list_root() {
-    let Some(volume) = (unsafe { VOLUME }) else { framebuffer::write_line("FAT32 NOT MOUNTED"); return };
+    let Some(volume) = (unsafe { VOLUME }) else {
+        framebuffer::write_line("FAT32 NOT MOUNTED");
+        return;
+    };
     walk_directory(volume, |entry| {
-        framebuffer::write_text(&short_name(entry));
+        write_short_name(entry);
         if entry[11] & 0x10 != 0 { framebuffer::write_text("/"); }
         framebuffer::write_byte(b'\n');
         false
@@ -52,8 +59,14 @@ pub fn list_root() {
 }
 
 pub fn cat(name: &[u8]) {
-    let Some(volume) = (unsafe { VOLUME }) else { framebuffer::write_line("FAT32 NOT MOUNTED"); return };
-    let Some(target) = make_short_name(name) else { framebuffer::write_line("USE 8.3 FILE NAME"); return };
+    let Some(volume) = (unsafe { VOLUME }) else {
+        framebuffer::write_line("FAT32 NOT MOUNTED");
+        return;
+    };
+    let Some(target) = make_short_name(name) else {
+        framebuffer::write_line("USE 8.3 FILE NAME");
+        return;
+    };
     let mut found = None;
     walk_directory(volume, |entry| {
         if entry[..11] == target {
@@ -63,12 +76,18 @@ pub fn cat(name: &[u8]) {
             true
         } else { false }
     });
-    let Some((mut cluster, mut remaining)) = found else { framebuffer::write_line("FILE NOT FOUND"); return };
+    let Some((mut cluster, mut remaining)) = found else {
+        framebuffer::write_line("FILE NOT FOUND");
+        return;
+    };
     let mut sector = [0u8; 512];
     while cluster >= 2 && cluster < 0x0fff_fff8 && remaining != 0 {
         let first = cluster_sector(volume, cluster);
         for offset in 0..volume.sectors_per_cluster {
-            if !virtio_blk::read_sector((first + offset) as u64, &mut sector) { framebuffer::write_line("DISK READ ERROR"); return; }
+            if !virtio_blk::read_sector((first + offset) as u64, &mut sector) {
+                framebuffer::write_line("DISK READ ERROR");
+                return;
+            }
             let count = remaining.min(512) as usize;
             for &byte in &sector[..count] {
                 if byte == b'\n' || byte == b'\r' || byte == b'\t' || byte.is_ascii_graphic() || byte == b' ' {
@@ -83,7 +102,7 @@ pub fn cat(name: &[u8]) {
     framebuffer::write_byte(b'\n');
 }
 
-fn walk_directory(mut volume: Volume, mut visitor: impl FnMut(&[u8; 32]) -> bool) {
+fn walk_directory(volume: Volume, mut visitor: impl FnMut(&[u8; 32]) -> bool) {
     let mut cluster = volume.root_cluster;
     let mut sector = [0u8; 512];
     for _ in 0..128 {
@@ -114,25 +133,47 @@ fn cluster_sector(volume: Volume, cluster: u32) -> u32 {
     volume.data_start + (cluster - 2) * volume.sectors_per_cluster
 }
 
-fn short_name(entry: &[u8; 32]) -> [char; 12] {
-    let mut result = ['\0'; 12];
-    let mut index = 0;
-    for &byte in &entry[..8] { if byte != b' ' { result[index] = byte as char; index += 1; } }
-    if entry[8] != b' ' { result[index] = '.'; index += 1; for &byte in &entry[8..11] { if byte != b' ' { result[index] = byte as char; index += 1; } } }
-    result
+fn write_short_name(entry: &[u8; 32]) {
+    for &byte in &entry[..8] {
+        if byte != b' ' { framebuffer::write_byte(byte); }
+    }
+    if entry[8] != b' ' {
+        framebuffer::write_byte(b'.');
+        for &byte in &entry[8..11] {
+            if byte != b' ' { framebuffer::write_byte(byte); }
+        }
+    }
 }
 
 fn make_short_name(name: &[u8]) -> Option<[u8; 11]> {
     let mut output = [b' '; 11];
-    let mut base = 0usize; let mut ext = 8usize; let mut dotted = false;
+    let mut base = 0usize;
+    let mut ext = 8usize;
+    let mut dotted = false;
     for &byte in name {
-        if byte == b'.' { if dotted { return None; } dotted = true; continue; }
+        if byte == b'.' {
+            if dotted { return None; }
+            dotted = true;
+            continue;
+        }
         if !byte.is_ascii_alphanumeric() && byte != b'_' { return None; }
-        if dotted { if ext == 11 { return None; } output[ext] = byte.to_ascii_uppercase(); ext += 1; }
-        else { if base == 8 { return None; } output[base] = byte.to_ascii_uppercase(); base += 1; }
+        if dotted {
+            if ext == 11 { return None; }
+            output[ext] = byte.to_ascii_uppercase();
+            ext += 1;
+        } else {
+            if base == 8 { return None; }
+            output[base] = byte.to_ascii_uppercase();
+            base += 1;
+        }
     }
     (base > 0).then_some(output)
 }
 
-fn le16(data: &[u8], offset: usize) -> u16 { u16::from_le_bytes([data[offset], data[offset + 1]]) }
-fn le32(data: &[u8], offset: usize) -> u32 { u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]) }
+fn le16(data: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes([data[offset], data[offset + 1]])
+}
+
+fn le32(data: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+}

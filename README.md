@@ -40,4 +40,8 @@ uptime
 - Ring 3, user address spaces и syscalls.
 - ACPI shutdown и APIC.
 
-MIT
+## Лицензия
+
+Исходный код доступен для изучения, изменения и распространения в некоммерческих целях по **PolyForm Noncommercial License 1.0.0**. Коммерческое использование без отдельного разрешения запрещено. Полные условия находятся в [LICENSE.md](LICENSE.md).
+
+Важно: из-за запрета коммерческого использования это source-available лицензия, а не OSI-approved open-source лицензия.
