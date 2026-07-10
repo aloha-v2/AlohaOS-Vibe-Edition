@@ -5,15 +5,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$Esp = Join-Path $Root "esp"
 $FirmwareDir = Join-Path $Root "firmware"
 $ProjectOvmf = Join-Path $FirmwareDir "OVMF_CODE.fd"
 $OvmfUrl = "https://raw.githubusercontent.com/retrage/edk2-nightly/master/bin/RELEASEX64_OVMF.fd"
 
 & (Join-Path $Root "scripts\build.ps1")
 
-# Prefer an explicitly supplied firmware path. Otherwise keep a cached OVMF
-# image inside the project and download it on the first run.
+# Keep the downloaded firmware in the project so subsequent runs are offline.
 if (-not $OvmfCode) {
     $OvmfCode = $ProjectOvmf
 }
@@ -51,14 +49,46 @@ else {
     Write-Host "Using cached OVMF: $OvmfCode" -ForegroundColor DarkGray
 }
 
-& $Qemu `
-    -machine q35 `
-    -m 256M `
-    -bios $OvmfCode `
-    -drive "format=raw,file=fat:rw:$Esp" `
-    -net none `
-    -no-reboot
+# QEMU for Windows can misread Cyrillic paths. Map the repository to a free
+# drive letter so QEMU only receives short ASCII paths such as Z:\esp.
+$MappedDrive = $null
+foreach ($Letter in @("Z", "Y", "X", "W", "V", "U", "T", "S", "R", "Q", "P")) {
+    if (-not (Test-Path "${Letter}:\")) {
+        $MappedDrive = "${Letter}:"
+        break
+    }
+}
+if (-not $MappedDrive) {
+    throw "No free drive letter is available for the temporary QEMU path mapping."
+}
 
+& subst.exe $MappedDrive $Root
 if ($LASTEXITCODE -ne 0) {
-    throw "QEMU exited with code $LASTEXITCODE"
+    throw "Could not map $Root to $MappedDrive"
+}
+
+try {
+    $QemuEsp = "$MappedDrive\esp"
+    if ($OvmfCode -eq $ProjectOvmf) {
+        $QemuOvmf = "$MappedDrive\firmware\OVMF_CODE.fd"
+    }
+    else {
+        $QemuOvmf = $OvmfCode
+    }
+
+    Write-Host "Starting QEMU via $MappedDrive (Unicode-safe path)..." -ForegroundColor Cyan
+    & $Qemu `
+        -machine q35 `
+        -m 256M `
+        -bios $QemuOvmf `
+        -drive "format=raw,file=fat:rw:$QemuEsp" `
+        -net none `
+        -no-reboot
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "QEMU exited with code $LASTEXITCODE"
+    }
+}
+finally {
+    & subst.exe $MappedDrive /D | Out-Null
 }
