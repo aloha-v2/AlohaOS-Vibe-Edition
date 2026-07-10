@@ -42,6 +42,18 @@ jobs:
           set -e
           cat qemu.log
           test -f serial.log && cat serial.log
-          test "$status" -eq 124
-          grep -q "interrupts enabled, starting shell" serial.log
-          ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' serial.log
+          if [ "$status" -ne 124 ]; then
+            message=$(tail -n 60 qemu.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=QEMU exited early::$message"
+            exit 1
+          fi
+          if ! grep -q "interrupts enabled, starting shell" serial.log; then
+            message=$(tail -n 80 serial.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=Kernel did not reach shell::$message"
+            exit 1
+          fi
+          if grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' serial.log; then
+            message=$(tail -n 80 serial.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=Kernel fault detected::$message"
+            exit 1
+          fi
