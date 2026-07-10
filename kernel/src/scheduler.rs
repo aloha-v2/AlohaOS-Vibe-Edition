@@ -1,8 +1,7 @@
 //! Two-task round-robin scheduler with an explicit runtime safety gate.
 //!
-//! Context infrastructure is initialized at boot, but cross-task preemption is
-//! disabled until the operator runs `sched on`. This keeps the known-good shell
-//! path unchanged while allowing controlled hardware validation.
+//! The stable boot path does not touch XSAVE or the worker frame. Context
+//! infrastructure is initialized lazily when the operator runs `sched on`.
 
 use core::arch::asm;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
@@ -16,6 +15,7 @@ const KERNEL_DATA_SELECTOR: u64 = 0x10;
 static PREEMPTION_TICKS: AtomicU64 = AtomicU64::new(0);
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
 static PREEMPTION_ENABLED: AtomicBool = AtomicBool::new(false);
+static WORKER_PREPARED: AtomicBool = AtomicBool::new(false);
 static STATES: [AtomicU8; TASK_COUNT] = [
     AtomicU8::new(TaskState::Running as u8),
     AtomicU8::new(TaskState::Blocked as u8),
@@ -62,6 +62,7 @@ pub fn init() {
     PREEMPTION_TICKS.store(0, Ordering::Relaxed);
     CURRENT.store(0, Ordering::Relaxed);
     PREEMPTION_ENABLED.store(false, Ordering::Release);
+    WORKER_PREPARED.store(false, Ordering::Release);
     WORKER_HEARTBEAT.store(0, Ordering::Relaxed);
     STATES[0].store(TaskState::Running as u8, Ordering::Release);
     STATES[1].store(TaskState::Blocked as u8, Ordering::Release);
@@ -69,14 +70,20 @@ pub fn init() {
         WAKE_TICKS[task].store(NO_WAKE_DEADLINE, Ordering::Relaxed);
         SWITCHES[task].store(0, Ordering::Relaxed);
     }
+    serial::info(format_args!("scheduler: stable path ready, preemption gated"));
+}
 
+fn prepare_worker() -> bool {
+    if WORKER_PREPARED.load(Ordering::Acquire) {
+        return true;
+    }
     if !task_context::init() {
         serial::error(format_args!("scheduler: context initialization failed"));
-        return;
+        return false;
     }
     let Some(stack_top) = task_stacks::stack_top(1) else {
         serial::error(format_args!("scheduler: worker stack unavailable"));
-        return;
+        return false;
     };
     let prepared = unsafe {
         task_context::prepare_kernel_task(
@@ -88,12 +95,14 @@ pub fn init() {
             KERNEL_DATA_SELECTOR,
         )
     };
-    if prepared {
-        STATES[1].store(TaskState::Ready as u8, Ordering::Release);
-        serial::info(format_args!("scheduler: worker ready, preemption gated"));
-    } else {
+    if !prepared {
         serial::error(format_args!("scheduler: worker frame unavailable"));
+        return false;
     }
+    STATES[1].store(TaskState::Ready as u8, Ordering::Release);
+    WORKER_PREPARED.store(true, Ordering::Release);
+    serial::info(format_args!("scheduler: worker prepared"));
+    true
 }
 
 extern "C" fn worker_task() -> ! {
@@ -180,7 +189,7 @@ pub fn set_preemption(enabled: bool) -> bool {
         return false;
     }
     if enabled {
-        if !task_context::is_ready() || state(1) != Some(TaskState::Ready) {
+        if !prepare_worker() || state(1) != Some(TaskState::Ready) {
             return false;
         }
         PREEMPTION_ENABLED.store(true, Ordering::Release);

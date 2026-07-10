@@ -12,11 +12,11 @@
 - Shell, COM1 logging, task lifecycle и guarded task stacks.
 - Отдельный 20 KiB scheduler/timer IST stack проверен на Windows/QEMU без Double Fault.
 - Assembly-only trampoline сохраняет persistent IST frame, CR3, FS/GS и XSAVE state.
-- Round-robin подключён за runtime gate и по умолчанию выключен.
+- Round-robin подключён за lazy runtime gate и по умолчанию выключен.
 
 ## Scheduler status
 
-Стабильная база подтверждена: shell, PIT timer, dedicated timer IST и FAT32 работают. Новый low-level trampoline переносит полный GPR/IRET frame с общего IST в persistent per-task slot и не вызывает Rust между сохранением и восстановлением extended context. Для контролируемой проверки round-robin включается командой `sched on`; до hardware stress-test он не включается автоматически.
+Стабильный boot path не трогает XSAVE и worker context. Команда `sched on` лениво готовит persistent frame, включает low-level trampoline и round-robin. До hardware stress-test gate не открывается автоматически.
 
 ## Windows
 
