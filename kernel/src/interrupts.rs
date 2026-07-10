@@ -1,16 +1,109 @@
 //! IDT, CPU exception stubs, timer IRQ and keyboard IRQ.
 
-use core::arch::{asm,global_asm};use core::mem::size_of;use core::ptr::addr_of;
-use crate::{framebuffer,gdt,halt,keyboard,pic,timer};
-#[derive(Clone,Copy)]#[repr(C,packed)]struct IdtEntry{offset_low:u16,selector:u16,ist:u8,attributes:u8,offset_middle:u16,offset_high:u32,reserved:u32}
-impl IdtEntry{const MISSING:Self=Self{offset_low:0,selector:0,ist:0,attributes:0,offset_middle:0,offset_high:0,reserved:0};fn handler(address:u64,ist:u8)->Self{Self{offset_low:address as u16,selector:gdt::code_selector(),ist:ist&7,attributes:0x8e,offset_middle:(address>>16)as u16,offset_high:(address>>32)as u32,reserved:0}}}
-#[repr(C,packed)]struct IdtPointer{limit:u16,base:u64}static mut IDT:[IdtEntry;256]=[IdtEntry::MISSING;256];
-unsafe extern"C"{fn isr_divide_error();fn isr_breakpoint();fn isr_invalid_opcode();fn isr_double_fault();fn isr_general_protection();fn isr_page_fault();fn irq_timer();fn irq_keyboard();}
-pub fn init(){unsafe{IDT[0]=IdtEntry::handler(isr_divide_error as*const()as u64,0);IDT[3]=IdtEntry::handler(isr_breakpoint as*const()as u64,0);IDT[6]=IdtEntry::handler(isr_invalid_opcode as*const()as u64,0);IDT[8]=IdtEntry::handler(isr_double_fault as*const()as u64,gdt::double_fault_ist());IDT[13]=IdtEntry::handler(isr_general_protection as*const()as u64,0);IDT[14]=IdtEntry::handler(isr_page_fault as*const()as u64,0);IDT[pic::TIMER_VECTOR as usize]=IdtEntry::handler(irq_timer as*const()as u64,0);IDT[pic::KEYBOARD_VECTOR as usize]=IdtEntry::handler(irq_keyboard as*const()as u64,0);let pointer=IdtPointer{limit:(size_of::<[IdtEntry;256]>()-1)as u16,base:addr_of!(IDT)as u64};asm!("lidt [{}]",in(reg)&pointer,options(readonly,nostack));}}
-pub fn enable(){unsafe{asm!("sti",options(nomem,nostack))}}
-#[no_mangle]pub extern"C"fn rust_timer_interrupt(){timer::interrupt()}
-#[no_mangle]pub extern"C"fn rust_keyboard_interrupt(){keyboard::interrupt()}
-#[no_mangle]pub extern"C"fn rust_exception_handler(vector:u64,error_code:u64,instruction_pointer:u64,fault_address:u64)->!{unsafe{asm!("cli",options(nomem,nostack))};let name=match vector{0=>"DIVIDE BY ZERO",3=>"BREAKPOINT",6=>"INVALID OPCODE",8=>"DOUBLE FAULT",13=>"GENERAL PROTECTION FAULT",14=>"PAGE FAULT",_=>"UNKNOWN CPU EXCEPTION"};framebuffer::panic_header(name);framebuffer::write_label_hex("VECTOR: ",vector);framebuffer::write_label_hex("ERROR:  ",error_code);framebuffer::write_label_hex("RIP:    ",instruction_pointer);if vector==14{framebuffer::write_label_hex("CR2:    ",fault_address)}halt()}
+use core::arch::{asm, global_asm};
+use core::mem::size_of;
+use core::ptr::addr_of;
+use crate::{framebuffer, gdt, halt, keyboard, pic, timer};
+
+#[derive(Clone, Copy)]
+#[repr(C, packed)]
+struct IdtEntry {
+    offset_low: u16,
+    selector: u16,
+    ist: u8,
+    attributes: u8,
+    offset_middle: u16,
+    offset_high: u32,
+    reserved: u32,
+}
+
+impl IdtEntry {
+    const MISSING: Self = Self {
+        offset_low: 0, selector: 0, ist: 0, attributes: 0,
+        offset_middle: 0, offset_high: 0, reserved: 0,
+    };
+
+    fn handler(address: u64, ist: u8) -> Self {
+        Self {
+            offset_low: address as u16,
+            selector: gdt::code_selector(),
+            ist: ist & 7,
+            attributes: 0x8e,
+            offset_middle: (address >> 16) as u16,
+            offset_high: (address >> 32) as u32,
+            reserved: 0,
+        }
+    }
+}
+
+#[repr(C, packed)]
+struct IdtPointer { limit: u16, base: u64 }
+
+static mut IDT: [IdtEntry; 256] = [IdtEntry::MISSING; 256];
+
+unsafe extern "C" {
+    fn isr_divide_error();
+    fn isr_breakpoint();
+    fn isr_invalid_opcode();
+    fn isr_double_fault();
+    fn isr_general_protection();
+    fn isr_page_fault();
+    fn irq_timer();
+    fn irq_keyboard();
+}
+
+pub fn init() {
+    unsafe {
+        IDT[0] = IdtEntry::handler(isr_divide_error as *const () as u64, 0);
+        IDT[3] = IdtEntry::handler(isr_breakpoint as *const () as u64, 0);
+        IDT[6] = IdtEntry::handler(isr_invalid_opcode as *const () as u64, 0);
+        IDT[8] = IdtEntry::handler(isr_double_fault as *const () as u64, gdt::double_fault_ist());
+        IDT[13] = IdtEntry::handler(isr_general_protection as *const () as u64, 0);
+        IDT[14] = IdtEntry::handler(isr_page_fault as *const () as u64, 0);
+        IDT[pic::TIMER_VECTOR as usize] = IdtEntry::handler(irq_timer as *const () as u64, 0);
+        IDT[pic::KEYBOARD_VECTOR as usize] = IdtEntry::handler(irq_keyboard as *const () as u64, 0);
+        let pointer = IdtPointer {
+            limit: (size_of::<[IdtEntry; 256]>() - 1) as u16,
+            base: addr_of!(IDT) as u64,
+        };
+        asm!("lidt [{}]", in(reg) &pointer, options(readonly, nostack));
+    }
+}
+
+pub fn enable() {
+    unsafe { asm!("sti", options(nomem, nostack)) }
+}
+
+#[no_mangle]
+pub extern "C" fn rust_timer_interrupt() {
+    timer::interrupt();
+}
+
+#[no_mangle]
+pub extern "C" fn rust_keyboard_interrupt() {
+    keyboard::interrupt();
+}
+
+#[no_mangle]
+pub extern "C" fn rust_exception_handler(
+    vector: u64,
+    error_code: u64,
+    instruction_pointer: u64,
+    fault_address: u64,
+) -> ! {
+    unsafe { asm!("cli", options(nomem, nostack)) };
+    let name = match vector {
+        0 => "DIVIDE BY ZERO", 3 => "BREAKPOINT", 6 => "INVALID OPCODE",
+        8 => "DOUBLE FAULT", 13 => "GENERAL PROTECTION FAULT",
+        14 => "PAGE FAULT", _ => "UNKNOWN CPU EXCEPTION",
+    };
+    framebuffer::panic_header(name);
+    framebuffer::write_label_hex("VECTOR: ", vector);
+    framebuffer::write_label_hex("ERROR:  ", error_code);
+    framebuffer::write_label_hex("RIP:    ", instruction_pointer);
+    if vector == 14 { framebuffer::write_label_hex("CR2:    ", fault_address); }
+    halt()
+}
 
 global_asm!(r#"
 .global isr_divide_error

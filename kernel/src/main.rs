@@ -5,8 +5,8 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, string::String, vec::Vec};
-use common::BootInfo;
 use core::panic::PanicInfo;
+use common::BootInfo;
 
 mod font;
 mod framebuffer;
@@ -23,7 +23,6 @@ mod shell;
 #[no_mangle]
 pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
     unsafe { core::arch::asm!("cli", options(nomem, nostack)) };
-
     let info = unsafe { &*boot_info };
     framebuffer::init(info.framebuffer);
     framebuffer::clear_console();
@@ -45,13 +44,9 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
     }
 
     heap::init().unwrap_or_else(|| fatal("KERNEL HEAP ALLOCATION FAILED"));
-
-    // Exercise allocation and deallocation before enabling hardware IRQs.
     let boxed = Box::new(0xa10a05u64);
     let mut values = Vec::with_capacity(128);
-    for value in 0..128u64 {
-        values.push(value * 3);
-    }
+    for value in 0..128u64 { values.push(value * 3); }
     let title = String::from("ALOHAOS ALLOC ONLINE");
     core::hint::black_box((&boxed, &values, &title, paging.pml4_physical));
     drop(title);
@@ -72,9 +67,7 @@ fn fatal(message: &str) -> ! {
 }
 
 pub fn halt() -> ! {
-    loop {
-        unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
-    }
+    loop { unsafe { core::arch::asm!("hlt", options(nomem, nostack)) }; }
 }
 
 #[panic_handler]
