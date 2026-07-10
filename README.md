@@ -7,30 +7,29 @@
 - UEFI ELF loader, framebuffer и memory map handoff.
 - GDT, TSS, IDT, ISR и panic screen.
 - Physical allocator, paging, higher-half direct map и reclaiming heap.
-- PIC, PIT 100 Hz, uptime, PS/2 keyboard, VirtIO Block и read-only FAT32.
+- PIC, PIT 100 Hz, uptime и PS/2 keyboard.
+- Legacy VirtIO Block + FAT32 image: `ls /`, `cat hello.txt`.
 - Shell, COM1 logging, task lifecycle и guarded task stacks.
-- Отдельный 20 KiB scheduler/timer IST stack; build и QEMU smoke зелёные.
+- Отдельный 20 KiB scheduler/timer IST stack.
 
 ## Scheduler status
 
-Прототип полного XSAVE context switch обнаружил Double Fault на Windows/QEMU, поэтому cross-task switching безопасно gated off. PIT, shell и lifecycle стабильны. Timer IRQ уже перенесён на отдельный IST stack, что изолирует scheduler path от текущего task stack.
-
-Следующий шаг: assembly-only context switch trampoline, затем включение round-robin только после QEMU и аппаратного stress-test.
+Полный XSAVE context-switch прототип поймал Double Fault на Windows/QEMU, поэтому cross-task switch безопасно выключен. Timer IRQ уже работает на отдельном IST stack. Следующий шаг: assembly-only trampoline, затем stress-test до включения round-robin.
 
 ## Windows
 
 ```powershell
 git fetch origin
-git switch brain/m0-context-switch
 git reset --hard origin/brain/m0-context-switch
 .\scripts\run-qemu.ps1
 ```
 
+После запуска проверь `tasks`, `ls /` и `cat hello.txt`.
+
 ## Дальше
 
-- Assembly-only switch trampoline.
-- Включить round-robin за runtime gate.
-- Часовой stress-test без Double Fault.
+- Assembly-only context switch trampoline.
+- Часовой scheduler stress-test.
 - IRQ-safe synchronization и frame deallocation.
 
 ## Лицензия
