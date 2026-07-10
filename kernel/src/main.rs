@@ -1,83 +1,139 @@
-//! AlohaOS kernel entry point.
+//! The AlohaOS kernel.
+//!
+//! For now it paints the "AlohaOS" splash onto the framebuffer handed over by
+//! AlohaBoot, with an allocator-free COM1 logger available from kernel entry.
 #![no_std]
 #![no_main]
 
-extern crate alloc;
-
-use alloc::{boxed::Box, string::String, vec::Vec};
 use core::panic::PanicInfo;
-use common::BootInfo;
+
+use common::{BootInfo, PixelFormat};
 
 mod font;
-mod framebuffer;
-mod gdt;
-mod interrupts;
-mod memory;
-mod paging;
-mod heap;
-mod pic;
-mod keyboard;
-mod timer;
-mod scheduler;
-mod virtio_blk;
-mod fat32;
-mod shell;
+mod serial;
 
+/// Kernel entry point. AlohaBoot jumps here with a pointer to `BootInfo`
+/// in `rdi` (System V AMD64 calling convention).
 #[no_mangle]
 pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
-    unsafe { core::arch::asm!("cli", options(nomem, nostack)) };
-    let info = unsafe { &*boot_info };
-    framebuffer::init(info.framebuffer);
-    framebuffer::clear_console();
-    gdt::init();
-    interrupts::init();
-    unsafe { memory::init(info.memory_map) };
+    unsafe { serial::init() };
+    serial::log(serial::Level::Info, format_args!("AlohaOS kernel entry"));
 
-    let test_frame = memory::allocate_frame()
-        .unwrap_or_else(|| fatal("NO USABLE PHYSICAL MEMORY"));
-    let paging = match paging::init(info.memory_map) {
-        Ok(value) => value,
-        Err(paging::PagingError::OutOfFrames) => fatal("PAGE TABLE ALLOCATION FAILED"),
-        Err(paging::PagingError::PhysicalAddressTooLarge) => fatal("PHYSICAL MEMORY EXCEEDS DIRECT MAP"),
-    };
-    if !paging::verify_direct_map(test_frame) {
-        fatal("HIGHER HALF DIRECT MAP TEST FAILED");
+    let info: &BootInfo = unsafe { &*boot_info };
+    let fb = &info.framebuffer;
+    serial::log(
+        serial::Level::Debug,
+        format_args!(
+            "framebuffer: {}x{}, stride {}",
+            fb.width, fb.height, fb.stride
+        ),
+    );
+
+    let buffer = fb.addr as *mut u32;
+    let stride = fb.stride;
+    let width = fb.width;
+    let height = fb.height;
+    let format = fb.pixel_format;
+
+    // Deep ocean-blue background.
+    let bg = compose(format, 0x0f, 0x17, 0x2a);
+    for y in 0..height {
+        for x in 0..width {
+            unsafe { put_pixel(buffer, stride, x, y, bg) };
+        }
     }
 
-    heap::init().unwrap_or_else(|| fatal("KERNEL HEAP ALLOCATION FAILED"));
-    let boxed = Box::new(1u64);
-    let values = Vec::from([1u64, 2, 3]);
-    let title = String::from("ALLOC");
-    core::hint::black_box((&boxed, &values, &title, paging.pml4_physical));
-    drop(title);
-    drop(values);
-    drop(boxed);
+    // "AlohaOS", centered and scaled to the screen.
+    let text = b"AlohaOS";
+    let scale = pick_scale(width);
+    let glyph_w = 8 * scale;
+    let text_w = glyph_w * text.len();
+    let text_h = 8 * scale;
 
-    let block_ready = virtio_blk::init();
-    let fat_ready = block_ready && fat32::init();
-    core::hint::black_box((block_ready, fat_ready));
+    let start_x = center(width, text_w);
+    let start_y = center(height, text_h);
 
-    scheduler::init();
-    unsafe {
-        pic::init_timer_and_keyboard();
-        timer::init();
+    let fg = compose(format, 0xf5, 0xa6, 0x23); // warm aloha orange
+
+    for (i, &ch) in text.iter().enumerate() {
+        draw_glyph(buffer, stride, start_x + i * glyph_w, start_y, ch, scale, fg);
     }
-    interrupts::enable();
-    shell::run()
+
+    serial::log(serial::Level::Info, format_args!("splash rendered, halting"));
+    halt();
 }
 
-fn fatal(message: &str) -> ! {
-    framebuffer::panic_header(message);
-    halt()
+/// Center `used` within `total`, clamped to 0.
+fn center(total: usize, used: usize) -> usize {
+    if total > used {
+        (total - used) / 2
+    } else {
+        0
+    }
 }
 
-pub fn halt() -> ! {
-    loop { unsafe { core::arch::asm!("hlt", options(nomem, nostack)) }; }
+/// Pick an integer scale so the title spans roughly a third of the screen.
+fn pick_scale(width: usize) -> usize {
+    let target = width / 3;
+    let natural = 8 * 7; // 7 glyphs * 8px
+    (target / natural).max(1)
+}
+
+/// Compose a 32-bit pixel for the given framebuffer byte order.
+fn compose(format: PixelFormat, r: u8, g: u8, b: u8) -> u32 {
+    let (r, g, b) = (r as u32, g as u32, b as u32);
+    match format {
+        PixelFormat::Rgb => (b << 16) | (g << 8) | r,
+        _ => (r << 16) | (g << 8) | b, // Bgr and Unknown
+    }
+}
+
+#[inline]
+unsafe fn put_pixel(buffer: *mut u32, stride: usize, x: usize, y: usize, color: u32) {
+    core::ptr::write_volatile(buffer.add(y * stride + x), color);
+}
+
+/// Blit a single 8x8 glyph, magnified by `scale`.
+fn draw_glyph(
+    buffer: *mut u32,
+    stride: usize,
+    x0: usize,
+    y0: usize,
+    ch: u8,
+    scale: usize,
+    color: u32,
+) {
+    let glyph = font::glyph(ch);
+    for (row, bits) in glyph.iter().enumerate() {
+        for col in 0..8 {
+            if bits & (0x80 >> col) != 0 {
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        unsafe {
+                            put_pixel(
+                                buffer,
+                                stride,
+                                x0 + col * scale + sx,
+                                y0 + row * scale + sy,
+                                color,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Park the CPU. `hlt` in a loop keeps it cool while doing nothing.
+fn halt() -> ! {
+    loop {
+        unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
+    }
 }
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    unsafe { core::arch::asm!("cli", options(nomem, nostack)) };
-    framebuffer::panic_header("RUST KERNEL PANIC");
+fn panic(info: &PanicInfo) -> ! {
+    serial::emergency_log(serial::Level::Error, format_args!("panic: {}", info));
     halt()
 }
