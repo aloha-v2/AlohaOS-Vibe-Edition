@@ -8,33 +8,29 @@
 - GDT, TSS, IDT, ISR и panic screen.
 - Physical allocator, paging, higher-half direct map и reclaiming heap.
 - PIC, PIT 100 Hz, uptime, PS/2 keyboard, VirtIO Block и read-only FAT32.
-- Shell и allocation-free COM1 logging.
-- Task lifecycle и guarded kernel stack для background worker.
+- Shell, COM1 logging, task lifecycle и guarded task stacks.
 - CI build и headless QEMU smoke test.
 
-## M0 context-switch branch
+## Scheduler status
 
-`brain/m0-context-switch` содержит preemptive two-task round-robin. Timer frame сохраняет GPR/RIP/RSP/RFLAGS, extended context хранит CR3, FS/GS base и x87/SSE/AVX через XSAVE/XRSTOR. Bootstrap shell остаётся на проверенном boot stack; background task использует отдельный guarded stack с unmapped lower guard и mapped ABI headroom.
+Полный XSAVE context и round-robin прототип обнаружил Double Fault на реальном Windows/QEMU запуске. Cross-task switch снова безопасно gated off: PIT, shell и lifecycle продолжают работать, но второй task не запускается. Это лучше, чем делать вид, что scheduler готов и оставлять ОС падающей.
 
-Автоматические release build и QEMU smoke test проходят. Перед merge нужна последняя ручная проверка: команда `tasks` должна показать `XSAVE CONTEXT SWITCH ACTIVE`, растущие context switches у обеих задач и worker heartbeat больше нуля.
+Следующая реализация должна использовать отдельный scheduler interrupt stack, строгий assembly trampoline и аппаратный stress-test до включения по умолчанию.
 
 ## Windows
 
 ```powershell
 git fetch origin
 git switch brain/m0-context-switch
-git pull
+git reset --hard origin/brain/m0-context-switch
 .\scripts\run-qemu.ps1
 ```
 
-В shell: `tasks`, `uptime`, `ls /`, `cat hello.txt`, `meminfo`.
-
 ## Дальше
 
-- Ручная проверка round-robin, затем merge PR #4.
-- Длительный scheduler stress test.
-- IRQ-safe synchronization и frame deallocation.
-- Ring 3, syscalls и user shell.
+- Переписать context-switch trampoline без Rust на switch path.
+- Добавить dedicated IST/scheduler stack.
+- Только после этого включить round-robin и часовой stress-test.
 
 ## Лицензия
 
