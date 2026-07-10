@@ -44,9 +44,9 @@ jobs:
              ! grep -q "interrupts enabled, starting shell" serial.log 2>/dev/null || \
              ! grep -q "storage: virtio_blk=true, fat32=true" serial.log 2>/dev/null || \
              grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' serial.log 2>/dev/null; then
-            serial=$(tail -n 80 serial.log 2>/dev/null | tr '\n' '|' | sed 's/%/%25/g;s/\r/%0D/g' | cut -c1-3500)
-            stderr=$(tail -n 40 qemu-stderr.log 2>/dev/null | tr '\n' '|' | sed 's/%/%25/g;s/\r/%0D/g' | cut -c1-1500)
-            debug=$(tail -n 40 qemu-debug.log 2>/dev/null | tr '\n' '|' | sed 's/%/%25/g;s/\r/%0D/g' | cut -c1-1500)
+            serial=$({ tail -n 80 serial.log 2>/dev/null || echo '<missing>'; } | tr '\n' '|' | sed 's/%/%25/g;s/\r/%0D/g' | cut -c1-3500)
+            stderr=$({ tail -n 40 qemu-stderr.log 2>/dev/null || echo '<missing>'; } | tr '\n' '|' | sed 's/%/%25/g;s/\r/%0D/g' | cut -c1-1500)
+            debug=$({ tail -n 40 qemu-debug.log 2>/dev/null || echo '<missing>'; } | tr '\n' '|' | sed 's/%/%25/g;s/\r/%0D/g' | cut -c1-1500)
             echo "::error file=.github/workflows/ci.yml,line=1,title=QEMU smoke status ${status}::SERIAL=${serial} STDERR=${stderr} DEBUG=${debug}"
             exit 1
           fi
