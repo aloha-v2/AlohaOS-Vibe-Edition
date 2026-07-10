@@ -2,14 +2,14 @@
 
 Цель: стабильная x86_64 ОС с user space, графическим сервером, рабочим столом, GUI-приложениями и настройками.
 
-Порядок важен. Не начинайте desktop до завершения этапов 1-5: иначе GUI будет работать поверх нестабильного ядра и любое приложение сможет обрушить всю ОС.
+Порядок важен. Не начинайте desktop до завершения этапов 1-5.
 
 ## 1. Стабильность ядра
 
-- [ ] Переписать полный x86_64 context switch: GPR, RIP, RSP, RFLAGS, CR3, FS/GS base, FPU/SSE/AVX через XSAVE/XRSTOR.
+- [ ] Переписать полный x86_64 context switch: GPR, RIP, RSP, RFLAGS, CR3, FS/GS base, FPU/SSE/AVX через XSAVE/XRSTOR. **Реализовано в `brain/m0-context-switch`, ожидает QEMU stress-test.**
 - [x] Реализовать lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
 - [x] Добавить отдельный kernel stack для каждой задачи и guard page от переполнения.
-- [ ] Сделать стабильный preemptive round-robin scheduler и stress-test переключений.
+- [ ] Сделать стабильный preemptive round-robin scheduler и stress-test переключений. **Scheduler реализован, runtime stress-test ещё не пройден.**
 - [ ] Добавить spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
 - [ ] Убрать глобальные `static mut` из горячих подсистем.
 - [ ] Реализовать нормальное освобождение физических фреймов.
@@ -19,14 +19,13 @@
 
 **Готово, когда:** несколько задач работают час без Double Fault, утечек и зависаний.
 
-### Выполнено в рабочей ветке
+### Выполнено
 
-- COM1 logger работает без heap и пишет этапы boot/panic с severity.
-- Lifecycle хранится атомарно; поддержаны block, wake, timed sleep и exit.
-- PIT переводит Sleeping в Ready при достижении wake tick.
-- Для каждой задачи мапится отдельный 16 KiB kernel stack.
-- Перед каждым стеком оставлена отсутствующая PTE: overflow вызывает page fault вместо порчи соседней памяти.
-- Команда `tasks` показывает состояния и deadline пробуждения.
+- COM1 logger без heap с boot/panic severity.
+- Lifecycle: block, wake, timed sleep, exit.
+- Отдельные guarded kernel stacks.
+- Полный interrupt frame и extended context реализованы в рабочей ветке.
+- `tasks` показывает switches и heartbeat фоновой задачи.
 
 ## 2. ACPI, APIC и современное железо
 
@@ -38,132 +37,45 @@
 - [ ] Реализовать ACPI reboot и shutdown.
 - [ ] Добавить PCI/PCIe enumeration через MCFG.
 
-**Готово, когда:** таймер, IRQ routing, reboot и shutdown работают без legacy-костылей.
-
 ## 3. Процессы, Ring 3 и системные вызовы
 
 - [ ] Добавить ring-3 code/data descriptors и TSS `RSP0`.
 - [ ] Создавать отдельный PML4 для каждого процесса.
 - [ ] Мапить user pages с флагами USER и NX.
-- [ ] Реализовать copy-on-write или хотя бы независимые address spaces.
+- [ ] Реализовать независимые address spaces или copy-on-write.
 - [ ] Настроить `syscall/sysret` с безопасной проверкой адресов.
-- [ ] Начальные syscalls: `exit`, `write`, `read`, `open`, `close`, `stat`, `mmap`, `sleep`, `spawn`, `wait`.
-- [ ] Добавить handles/file descriptors и таблицу ресурсов процесса.
-- [ ] Реализовать ELF loader для user-space программ.
+- [ ] Syscalls: `exit`, `write`, `read`, `open`, `close`, `stat`, `mmap`, `sleep`, `spawn`, `wait`.
+- [ ] Handles/file descriptors и таблица ресурсов процесса.
+- [ ] ELF loader для user-space программ.
 - [ ] Перенести shell из Ring 0 в user space.
 - [ ] Изолировать падение приложения от ядра и других процессов.
 
-**Готово, когда:** user-программа печатает текст, читает файл, падает и не валит kernel.
-
 ## 4. VFS и постоянная файловая система
 
-- [ ] Создать VFS API: inode, file, directory, mount point и path resolver.
-- [ ] Подключить FAT32 как VFS driver.
-- [ ] Добавить чтение подкаталогов и Long File Names.
-- [ ] Реализовать FAT32 write, create, truncate, delete и rename.
-- [ ] Добавить block cache и dirty-page flushing.
-- [ ] Сделать защиту от повреждения при сбое записи.
-- [ ] Добавить RAM filesystem для `/tmp`.
-- [ ] Определить дерево: `/bin`, `/apps`, `/system`, `/users`, `/tmp`, `/devices`.
-- [ ] Добавить права доступа и владельцев хотя бы в минимальном виде.
-- [ ] В перспективе перейти на журналируемую собственную FS или ext2/ext4 read/write.
-
-**Готово, когда:** файлы и настройки переживают reboot.
+- [ ] VFS API: inode, file, directory, mount point и path resolver.
+- [ ] FAT32 как VFS driver, LFN и подкаталоги.
+- [ ] FAT32 write/create/truncate/delete/rename.
+- [ ] Block cache, dirty-page flushing и crash-safe запись.
+- [ ] RAM filesystem для `/tmp`.
+- [ ] Дерево `/bin`, `/apps`, `/system`, `/users`, `/tmp`, `/devices`.
+- [ ] Минимальные владельцы и права доступа.
 
 ## 5. Драйверная модель и базовые устройства
 
-- [ ] Создать device manager и единый driver API.
-- [ ] Улучшить VirtIO Block: interrupts, несколько запросов, write и flush.
-- [ ] Добавить VirtIO Input или полноценный PS/2 mouse driver.
-- [ ] Добавить клавиатурные layouts, modifiers, repeat и Unicode input.
-- [ ] Добавить VirtIO GPU для QEMU вместо зависимости только от UEFI framebuffer.
-- [ ] Реализовать double buffering и page flipping.
-- [ ] Добавить EDID, выбор resolution и display modes.
-- [ ] Добавить RTC и wall-clock time.
-- [ ] Добавить VirtIO Network и базовый network stack позже.
-- [ ] Добавить audio driver позже, лучше начать с Intel HDA или VirtIO Sound.
+- [ ] Device manager и единый driver API.
+- [ ] VirtIO Block interrupts, multiple requests, write и flush.
+- [ ] VirtIO Input или полноценный PS/2 mouse.
+- [ ] Keyboard layouts, modifiers, repeat и Unicode.
+- [ ] VirtIO GPU, double buffering и page flipping.
+- [ ] EDID, resolution и display modes.
+- [ ] RTC и wall-clock time.
+- [ ] Позже: VirtIO Network и audio.
 
-**Готово, когда:** мышь, клавиатура и framebuffer/GPU доступны через стабильные kernel APIs.
+## 6-11. Graphics, IPC, desktop, apps, settings, security
 
-## 6. Графический фундамент
+После завершения этапов 1-5: 2D graphics, compositor, IPC, GUI toolkit, desktop shell, приложения, settings service и hardening.
 
-- [ ] Создать 2D graphics library: pixel, line, rectangle, rounded rectangle, image blit.
-- [ ] Перейти с 8x8 bitmap font на TrueType/OpenType rasterizer.
-- [ ] Добавить UTF-8, Unicode, font fallback и text measurement.
-- [ ] Реализовать RGBA surfaces и alpha blending.
-- [ ] Добавить clipping regions и damage tracking.
-- [ ] Реализовать compositor с back buffer.
-- [ ] Добавить hardware/software cursor.
-- [ ] Вынести display server/compositor в отдельный user-space процесс.
-- [ ] Определить IPC-протокол окон: create, resize, draw, input, close.
-- [ ] Не давать приложениям прямой доступ к framebuffer.
-
-**Готово, когда:** два изолированных процесса рисуют окна, перемещают их мышью и получают собственные события.
-
-## 7. IPC и GUI toolkit
-
-- [ ] Реализовать kernel IPC: message queues или channels.
-- [ ] Добавить shared memory для передачи оконных buffers без копирования.
-- [ ] Создать event loop для user-space приложений.
-- [ ] Сделать GUI toolkit: Window, View, Label, Button, TextBox, Checkbox, Slider, List, Menu.
-- [ ] Добавить layout engine: row, column, grid, padding, alignment.
-- [ ] Добавить focus, tab navigation, shortcuts и clipboard.
-- [ ] Определить theme API: colors, typography, spacing, radii, icons.
-- [ ] Добавить accessibility metadata хотя бы на уровне semantic roles.
-- [ ] Сделать стабильный application ABI/API и SDK crate.
-
-**Готово, когда:** одно приложение собирается отдельно от kernel и использует toolkit без прямой работы с пикселями.
-
-## 8. Рабочий стол
-
-- [ ] Реализовать login/session manager или пока автологин одного пользователя.
-- [ ] Сделать desktop shell отдельным user-space процессом.
-- [ ] Добавить wallpaper, desktop icons и context menu.
-- [ ] Добавить panel/taskbar, launcher, список окон, tray и clock.
-- [ ] Реализовать window decorations: title bar, minimize, maximize, close, resize.
-- [ ] Добавить virtual desktops после стабилизации одного desktop.
-- [ ] Сделать notifications service.
-- [ ] Добавить file picker и common dialogs.
-- [ ] Реализовать drag-and-drop.
-- [ ] Сохранять layout и desktop preferences в `/users/default/settings`.
-
-**Готово, когда:** пользователь запускает приложение, переключает окна и перезагружает ОС без потери настроек.
-
-## 9. Базовые GUI-приложения
-
-- [ ] Settings: display, theme, keyboard, mouse, time, storage, system info.
-- [ ] File Manager: folders, copy, move, rename, delete, properties.
-- [ ] Terminal: запуск shell в user space, history и scrollback.
-- [ ] Text Editor: open/save, selection, clipboard, undo/redo.
-- [ ] System Monitor: CPU, RAM, processes, uptime и disks.
-- [ ] Image Viewer.
-- [ ] Calculator.
-- [ ] About AlohaOS.
-- [ ] App launcher и application manifests.
-- [ ] Package/install format только после стабилизации VFS и process ABI.
-
-## 10. Настройки и конфигурация
-
-- [ ] Определить versioned settings format, например UTF-8 key/value или компактный binary format.
-- [ ] Создать settings service вместо прямой записи каждым приложением.
-- [ ] Разделить system settings и per-user settings.
-- [ ] Добавить атомарную запись через temporary file + rename.
-- [ ] Добавить defaults, validation и migration между версиями.
-- [ ] Сделать live notifications об изменении theme/language/display.
-- [ ] Добавить reset-to-default и recovery mode.
-
-## 11. Безопасность и надёжность
-
-- [ ] Включить NX, SMEP, SMAP и write-protect там, где CPU поддерживает.
-- [ ] Сделать W^X: страница не должна быть одновременно writable и executable.
-- [ ] Проверять все user pointers в syscalls.
-- [ ] Добавить process capabilities/permissions.
-- [ ] Разделить drivers, services и applications по привилегиям.
-- [ ] Добавить watchdog и crash reports.
-- [ ] Реализовать safe mode и recovery shell.
-- [ ] Сделать fuzz tests для ELF, FAT32, path parser и IPC messages.
-
-## 12. Рекомендуемые milestone-релизы
+## 12. Milestones
 
 - [ ] **M0 Kernel Stable:** exceptions, memory, full scheduler, tests.
 - [ ] **M1 Userland:** Ring 3, syscalls, ELF apps, user shell.
@@ -174,8 +86,7 @@
 
 ## Ближайшие задачи
 
-1. Реализовать полный task context и стабильный scheduler без Double Fault.
-2. Сделать round-robin stress test.
-3. Перенести shell в Ring 3 через минимальные syscalls.
-4. Построить VFS поверх VirtIO Block и FAT32.
-5. Добавить mouse input и VirtIO GPU.
+1. Пройти QEMU runtime и stress-test нового context switch.
+2. Добавить IRQ-safe synchronization primitives.
+3. Добавить освобождение физических frames.
+4. Перенести shell в Ring 3.
