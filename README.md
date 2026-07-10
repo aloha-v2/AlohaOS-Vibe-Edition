@@ -9,7 +9,7 @@
 - Physical frame allocator, 4-level paging и higher-half direct map.
 - Reclaiming linked-list heap, `Box`, `Vec`, `String` и `dealloc`.
 - PIC 8259, PIT 100 Hz, uptime и PS/2 keyboard.
-- Preemptive round-robin kernel scheduler, отдельный 64-КБ stack фонового task и context switch из timer IRQ каждые 5 тиков.
+- Timer scheduler hook и сохранение полного GPR interrupt frame; cross-task switch временно отключён до реализации полного x86_64 context (FPU/SIMD, kernel stacks, lifecycle).
 - Legacy VirtIO Block и read-only FAT32: `ls /`, `cat hello.txt`.
 - Shell: history, `help`, `clear`, `meminfo`, `uptime`, `tasks`, `ls`, `cat`, `reboot`.
 
@@ -22,8 +22,6 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\run-qemu.ps1
 ```
 
-Скрипт собирает AlohaBoot и kernel, скачивает OVMF, создаёт 64-МБ FAT32 image и подключает transitional VirtIO Block device.
-
 ## Проверка
 
 ```text
@@ -34,10 +32,11 @@ cat hello.txt
 meminfo
 ```
 
-Повторный `tasks` должен показывать растущие `SWITCHES` и `WORKER HEARTBEAT`: это подтверждает реальное вытесняющее переключение между shell task и фоновым kernel task.
+`tasks` показывает PIT scheduling ticks. Настоящее переключение между kernel tasks сейчас намеренно staged off: предыдущая неполная реализация сохраняла только GPR/RSP и могла вызвать Double Fault.
 
 ## Дальше
 
+- Полный x86_64 task context и стабильный preemptive scheduler.
 - Запись FAT32, VFS и подкаталоги.
 - Ring 3, user address spaces и syscalls.
 - ACPI shutdown и APIC.
