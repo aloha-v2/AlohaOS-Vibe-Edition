@@ -23,7 +23,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 ovmf
           rustup target add x86_64-unknown-uefi x86_64-unknown-none
-      - run: make esp PROFILE=release
+      - name: Build ESP and FAT32 test disk
+        run: |
+          make esp PROFILE=release
+          mkdir -p disk
+          python3 scripts/create-fat32.py disk/aloha-fat32.img
+          test -s disk/aloha-fat32.img
       - name: Boot shell, timer IST and FAT32
         shell: bash
         run: |
