@@ -2,17 +2,17 @@
 
 ## 1. Стабильность ядра
 
-- [ ] Полный x86_64 context switch: hardware smoke и автоматический 60s stress пройдены, часовой прогон впереди.
+- [x] Полный x86_64 context-switch механизм: GPR/IRET, CR3, FS/GS и XSAVE/XRSTOR.
 - [x] Lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
 - [x] Guarded kernel stack infrastructure.
-- [ ] Preemptive round-robin и часовой stress-test; runtime gate, hardware smoke и 60s CI stress готовы.
 - [x] Dedicated scheduler/timer IST stack, проверен на Windows/QEMU.
-- [x] Assembly-only extended-context trampoline (CR3, FS/GS, XSAVE/XRSTOR).
+- [x] Assembly-only extended-context trampoline.
 - [x] Persistent per-task GPR/IRET frames для переключения с timer IST.
 - [x] Runtime gate `sched on|off`, по умолчанию выключен.
 - [x] Hardware smoke: обе задачи 588 switches, worker heartbeat 588, shell и FAT32 живы.
-- [x] Автоматический 60-секундный QEMU scheduler stress.
-- [ ] Ручной workflow `Scheduler one-hour stress` должен пройти 3600 секунд.
+- [x] Автоматический 60-секундный QEMU scheduler stress без Double Fault.
+- [ ] Часовой `Scheduler one-hour stress`: запущен, ожидается результат.
+- [ ] Включить preemptive round-robin по умолчанию после зелёного часового теста.
 - [x] IRQ-safe spinlock primitive и миграция COM1 logger.
 - [ ] Mutex, semaphore и wait queue.
 - [ ] Мигрировать heap/device shared state на IRQ-safe primitives.
@@ -20,7 +20,7 @@
 - [ ] Освобождение физических фреймов.
 - [x] COM1 kernel log и severity.
 - [ ] Backtrace для panic screen.
-- [ ] Полный QEMU test suite; boot/timer/FAT32 smoke уже работает.
+- [ ] Полный QEMU test suite; build, boot/timer/FAT32 smoke и 60s scheduler stress работают.
 
 ## 2. ACPI/APIC
 
@@ -49,7 +49,7 @@
 
 ## Ближайшие задачи
 
-1. Проверить IRQ-safe spinlock через build, smoke и scheduler stress.
-2. Мигрировать heap lock на общий primitive.
-3. Запустить `Scheduler one-hour stress`.
-4. Mutex, semaphore, wait queue и frame deallocation.
+1. Дождаться результата часового scheduler stress-test.
+2. Мигрировать heap lock на общий IRQ-safe primitive.
+3. Добавить mutex, semaphore и wait queue.
+4. Physical frame deallocation.
