@@ -15,11 +15,12 @@ mod interrupts;
 mod memory;
 mod paging;
 mod heap;
+mod pic;
+mod keyboard;
 
 #[no_mangle]
 pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
     unsafe { core::arch::asm!("cli", options(nomem, nostack)) };
-
     let info = unsafe { &*boot_info };
     framebuffer::init(info.framebuffer);
     framebuffer::clear(0x0f, 0x17, 0x2a);
@@ -30,10 +31,7 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
 
     gdt::init();
     interrupts::init();
-    framebuffer::write_line("GDT TSS IDT READY");
-
     unsafe { memory::init(info.memory_map) };
-    framebuffer::write_line("UEFI MEMORY MAP READY");
 
     let test_frame = memory::allocate_frame().unwrap_or_else(|| fatal("NO USABLE PHYSICAL MEMORY"));
     let paging = match paging::init(info.memory_map) {
@@ -41,37 +39,43 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
         Err(paging::PagingError::OutOfFrames) => fatal("PAGE TABLE ALLOCATION FAILED"),
         Err(paging::PagingError::PhysicalAddressTooLarge) => fatal("PHYSICAL MEMORY EXCEEDS DIRECT MAP"),
     };
-    if !paging::verify_direct_map(test_frame) {
-        fatal("HIGHER HALF DIRECT MAP TEST FAILED");
-    }
-    framebuffer::write_line("4 LEVEL PAGING READY");
-    framebuffer::write_line("HIGHER HALF DIRECT MAP READY");
-    framebuffer::write_label_hex("PML4 PHYSICAL:   ", paging.pml4_physical);
+    if !paging::verify_direct_map(test_frame) { fatal("HIGHER HALF DIRECT MAP TEST FAILED"); }
 
     let initial_heap = heap::init().unwrap_or_else(|| fatal("KERNEL HEAP ALLOCATION FAILED"));
-    framebuffer::write_label_hex("HEAP PHYSICAL:   ", initial_heap.physical_start);
-    framebuffer::write_label_hex("HEAP VIRTUAL:    ", initial_heap.virtual_start);
-    framebuffer::write_label_hex("HEAP SIZE:       ", initial_heap.size as u64);
-
-    // Real liballoc smoke test: Box, Vec and String all use our global heap.
     let boxed = Box::new(0xa10a_05u64);
     let mut values = Vec::with_capacity(128);
-    for value in 0..128u64 {
-        values.push(value * 3);
-    }
+    for value in 0..128u64 { values.push(value * 3); }
     let title = String::from("ALOHAOS ALLOC ONLINE");
-    let checksum: u64 = values.iter().copied().sum::<u64>() ^ *boxed;
     core::hint::black_box((&boxed, &values, &title));
 
-    let heap_stats = heap::stats();
-    framebuffer::write_label_hex("HEAP USED:       ", heap_stats.used as u64);
-    framebuffer::write_label_hex("HEAP FREE:       ", heap_stats.free as u64);
-    framebuffer::write_label_hex("ALLOC CHECKSUM:  ", checksum);
-    framebuffer::write_line("BOX VEC STRING READY");
-    framebuffer::write_line("");
-    framebuffer::write_line("MEMORY STAGE 3 READY");
+    framebuffer::write_line("GDT TSS IDT READY");
+    framebuffer::write_line("MEMORY PAGING HEAP READY");
+    framebuffer::write_label_hex("PML4 PHYSICAL: ", paging.pml4_physical);
+    framebuffer::write_label_hex("HEAP PHYSICAL: ", initial_heap.physical_start);
 
-    halt()
+    unsafe { pic::init_keyboard_only() };
+    framebuffer::write_line("PIC 8259 READY");
+    framebuffer::write_line("PS2 KEYBOARD IRQ1 READY");
+    framebuffer::write_line("");
+    framebuffer::set_color(0xf5, 0xa6, 0x23);
+    framebuffer::write_text("TYPE HERE: ");
+    framebuffer::set_color(0xff, 0xff, 0xff);
+    interrupts::enable();
+
+    keyboard_loop()
+}
+
+fn keyboard_loop() -> ! {
+    loop {
+        while let Some(scancode) = keyboard::pop_scancode() {
+            if let Some(character) = keyboard::decode(scancode) {
+                framebuffer::write_byte(character);
+            }
+        }
+        // Atomic enable-and-sleep avoids missing an IRQ between checking the
+        // queue and halting. An interrupt wakes the CPU and returns here.
+        unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
+    }
 }
 
 fn fatal(message: &str) -> ! {
@@ -80,9 +84,7 @@ fn fatal(message: &str) -> ! {
 }
 
 pub fn halt() -> ! {
-    loop {
-        unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
-    }
+    loop { unsafe { core::arch::asm!("hlt", options(nomem, nostack)) }; }
 }
 
 #[panic_handler]
