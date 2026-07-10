@@ -10,11 +10,12 @@
 - Reclaiming linked-list heap, `Box`, `Vec`, `String` и `dealloc`.
 - PIC 8259, PIT 100 Hz, uptime и PS/2 keyboard.
 - Task lifecycle: Ready, Running, Blocked, Sleeping и Dead; timer автоматически будит sleeping tasks.
-- Для каждой задачи выделен отдельный 16 KiB kernel stack с реально unmapped 4 KiB guard page.
-- Timer scheduler hook и сохранение полного GPR interrupt frame; cross-task switch временно отключён до реализации FPU/SIMD context.
+- Для каждой задачи выделен отдельный 16 KiB kernel stack с unmapped 4 KiB guard page.
+- Timer scheduler hook и сохранение GPR interrupt frame; cross-task switch выключен до реализации extended CPU context.
 - Legacy VirtIO Block и read-only FAT32: `ls /`, `cat hello.txt`.
 - Shell: history, `help`, `clear`, `meminfo`, `uptime`, `tasks`, `ls`, `cat`, `reboot`.
 - Allocation-free COM1 kernel log с уровнями DEBUG, INFO и ERROR, включая panic output.
+- GitHub Actions проверяет release-сборку AlohaBoot и kernel на каждой рабочей ветке и PR.
 
 ## Прогресс по roadmap
 
@@ -22,7 +23,8 @@
 - Добавлен COM1 logger без зависимости от heap.
 - Добавлена атомарная модель lifecycle задач и timer-driven wakeup.
 - Добавлены отдельные kernel stacks в выделенном virtual range; перед каждым стеком оставлена unmapped guard page.
-- Следующий этап: полный x86_64 context (CR3, FS/GS, XSAVE/XRSTOR), затем round-robin switch.
+- Добавлен обязательный CI build gate перед merge.
+- Следующий этап: исправить всё, что найдёт CI, затем полный x86_64 context и round-robin switch.
 
 Подробный порядок работ и статусы: [TODO.md](TODO.md).
 

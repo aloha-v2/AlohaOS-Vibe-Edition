@@ -1,0 +1,24 @@
+name: AlohaOS CI
+
+on:
+  push:
+    branches: [main, "brain/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain and targets
+        run: |
+          rustup show
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build AlohaBoot
+        run: cargo build --release --target x86_64-unknown-uefi -p alohaboot
+      - name: Build kernel
+        run: cargo build --release --target x86_64-unknown-none -p kernel
