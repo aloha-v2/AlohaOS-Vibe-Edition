@@ -20,9 +20,7 @@ const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 
 #[repr(C, align(4096))]
-struct PageTable {
- entries: [u64; ENTRY_COUNT],
-}
+struct PageTable { entries: [u64; ENTRY_COUNT] }
 
 static STACK_TOPS: [AtomicU64; TASK_COUNT] = [AtomicU64::new(0), AtomicU64::new(0)];
 static GUARD_STARTS: [AtomicU64; TASK_COUNT] = [AtomicU64::new(0), AtomicU64::new(0)];
@@ -30,70 +28,32 @@ static GUARD_STARTS: [AtomicU64; TASK_COUNT] = [AtomicU64::new(0), AtomicU64::ne
 pub fn init() -> bool {
  for task in 0..TASK_COUNT {
   let guard = STACK_VIRTUAL_BASE + task as u64 * REGION_PAGES * memory::FRAME_SIZE;
-  let physical = match memory::allocate_contiguous(STACK_PAGES) {
-   Some(value) => value,
-   None => return false,
-  };
-
-  // The guard address is never mapped. Only the pages above it receive PTEs.
+  let physical = match memory::allocate_contiguous(STACK_PAGES) { Some(value)=>value,None=>return false };
   for page in 0..STACK_PAGES {
-   let virtual_address = guard + memory::FRAME_SIZE * (page + 1);
-   let physical_address = physical + memory::FRAME_SIZE * page;
-   if unsafe { !map_page(virtual_address, physical_address) } {
-    return false;
-   }
+   let virtual_address=guard+memory::FRAME_SIZE*(page+1);
+   let physical_address=physical+memory::FRAME_SIZE*page;
+   if unsafe{!map_page(virtual_address,physical_address)}{return false}
   }
-
-  GUARD_STARTS[task].store(guard, Ordering::Release);
-  STACK_TOPS[task].store(guard + REGION_PAGES * memory::FRAME_SIZE, Ordering::Release);
+  GUARD_STARTS[task].store(guard,Ordering::Release);
+  STACK_TOPS[task].store(guard+REGION_PAGES*memory::FRAME_SIZE,Ordering::Release);
  }
  true
 }
 
-pub fn stack_top(task: usize) -> Option<u64> {
- let value = STACK_TOPS.get(task)?.load(Ordering::Acquire);
- (value != 0).then_some(value)
+pub fn stack_top(task:usize)->Option<u64>{let value=STACK_TOPS.get(task)?.load(Ordering::Acquire);(value!=0).then_some(value)}
+pub fn guard_start(task:usize)->Option<u64>{let value=GUARD_STARTS.get(task)?.load(Ordering::Acquire);(value!=0).then_some(value)}
+
+/// Permanently enter a task on its guarded kernel stack.
+pub unsafe fn enter(task:usize,entry:extern "C" fn()->!)->!{
+ let stack=stack_top(task).expect("task stack not initialized");
+ asm!("mov rsp, {stack}","xor rbp, rbp","call {entry}","ud2",stack=in(reg)stack,entry=in(reg)entry,options(noreturn));
 }
 
-pub fn guard_start(task: usize) -> Option<u64> {
- let value = GUARD_STARTS.get(task)?.load(Ordering::Acquire);
- (value != 0).then_some(value)
+unsafe fn map_page(virtual_address:u64,physical_address:u64)->bool{
+ let cr3=read_cr3()&ADDRESS_MASK;
+ let indices=[((virtual_address>>39)&0x1ff)as usize,((virtual_address>>30)&0x1ff)as usize,((virtual_address>>21)&0x1ff)as usize];
+ let mut table_frame=cr3;
+ for index in indices{let table=&mut*(table_frame as *mut PageTable);let entry=table.entries[index];if entry&PRESENT==0{let Some(frame)=memory::allocate_frame()else{return false};ptr::write_bytes(frame as *mut u8,0,memory::FRAME_SIZE as usize);table.entries[index]=frame|PRESENT|WRITABLE;table_frame=frame}else{table_frame=entry&ADDRESS_MASK}}
+ let table=&mut*(table_frame as *mut PageTable);let index=((virtual_address>>12)&0x1ff)as usize;if table.entries[index]&PRESENT!=0{return false}table.entries[index]=physical_address|PRESENT|WRITABLE;asm!("invlpg [{}]",in(reg)virtual_address,options(nostack,preserves_flags));true
 }
-
-unsafe fn map_page(virtual_address: u64, physical_address: u64) -> bool {
- let cr3 = read_cr3() & ADDRESS_MASK;
- let indices = [
-  ((virtual_address >> 39) & 0x1ff) as usize,
-  ((virtual_address >> 30) & 0x1ff) as usize,
-  ((virtual_address >> 21) & 0x1ff) as usize,
- ];
-
- let mut table_frame = cr3;
- for index in indices {
-  let table = &mut *(table_frame as *mut PageTable);
-  let entry = table.entries[index];
-  if entry & PRESENT == 0 {
-   let Some(frame) = memory::allocate_frame() else { return false };
-   ptr::write_bytes(frame as *mut u8, 0, memory::FRAME_SIZE as usize);
-   table.entries[index] = frame | PRESENT | WRITABLE;
-   table_frame = frame;
-  } else {
-   table_frame = entry & ADDRESS_MASK;
-  }
- }
-
- let table = &mut *(table_frame as *mut PageTable);
- let index = ((virtual_address >> 12) & 0x1ff) as usize;
- if table.entries[index] & PRESENT != 0 {
-  return false;
- }
- table.entries[index] = physical_address | PRESENT | WRITABLE;
- asm!("invlpg [{}]", in(reg) virtual_address, options(nostack, preserves_flags));
- true
-}
-
-fn read_cr3() -> u64 {
- let value: u64;
- unsafe { asm!("mov {}, cr3", out(reg) value, options(nomem, nostack, preserves_flags)) };
- value
-}
+fn read_cr3()->u64{let value:u64;unsafe{asm!("mov {}, cr3",out(reg)value,options(nomem,nostack,preserves_flags))};value}
