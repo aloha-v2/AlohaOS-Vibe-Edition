@@ -13,8 +13,10 @@
 - [x] Hardware smoke: обе задачи 588 switches, worker heartbeat 588, shell и FAT32 живы.
 - [x] Автоматический 60-секундный QEMU scheduler stress.
 - [ ] Ручной workflow `Scheduler one-hour stress` должен пройти 3600 секунд.
-- [ ] Spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
-- [ ] Убрать `static mut` из горячих подсистем.
+- [ ] Synchronization suite: IRQ-safe spinlock готов; mutex, semaphore и wait queue впереди.
+- [x] Heap и COM1 переведены на общий IRQ-safe spinlock.
+- [x] Keyboard decode state больше не использует `static mut`.
+- [ ] Убрать оставшиеся `static mut` из горячих подсистем.
 - [ ] Освобождение физических фреймов.
 - [x] COM1 kernel log и severity.
 - [ ] Backtrace для panic screen.
@@ -48,6 +50,6 @@
 ## Ближайшие задачи
 
 1. Запустить `Scheduler one-hour stress` через GitHub Actions.
-2. После зелёного часа включить round-robin по умолчанию.
-3. IRQ-safe synchronization.
+2. Довести mutex, semaphore и wait queue.
+3. После зелёного часа включить round-robin по умолчанию.
 4. Physical frame deallocation.
