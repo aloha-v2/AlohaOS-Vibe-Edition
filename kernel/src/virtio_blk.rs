@@ -6,11 +6,11 @@ use core::sync::atomic::{fence, Ordering};
 
 const VIRTIO_VENDOR: u16 = 0x1af4;
 const VIRTIO_BLOCK_LEGACY: u16 = 0x1001;
-const QUEUE_SIZE_MAX: u16 = 128;
-const QUEUE_USED_OFFSET: usize = 4096;
+const QUEUE_SIZE_MAX: u16 = 256;
+const QUEUE_MEMORY_SIZE: usize = 3 * 4096;
 
 #[repr(C, align(4096))]
-struct QueueMemory([u8; 8192]);
+struct QueueMemory([u8; QUEUE_MEMORY_SIZE]);
 
 #[repr(C)]
 struct RequestHeader {
@@ -22,12 +22,14 @@ struct RequestHeader {
 #[repr(C, align(512))]
 struct SectorBuffer([u8; 512]);
 
-static mut QUEUE: QueueMemory = QueueMemory([0; 8192]);
+static mut QUEUE: QueueMemory = QueueMemory([0; QUEUE_MEMORY_SIZE]);
 static mut HEADER: RequestHeader = RequestHeader { request_type: 0, reserved: 0, sector: 0 };
 static mut BUFFER: SectorBuffer = SectorBuffer([0; 512]);
 static mut STATUS: u8 = 0xff;
 static mut IO_BASE: u16 = 0;
 static mut QUEUE_SIZE: u16 = 0;
+static mut AVAILABLE_OFFSET: usize = 0;
+static mut USED_OFFSET: usize = 0;
 static mut AVAILABLE_INDEX: u16 = 0;
 static mut LAST_USED_INDEX: u16 = 0;
 static mut READY: bool = false;
@@ -49,12 +51,27 @@ pub fn init() -> bool {
         let _device_features = inl(io_base);
         outl(io_base + 4, 0);
         outw(io_base + 14, 0);
+
         let queue_size = inw(io_base + 12);
         if queue_size < 3 || queue_size > QUEUE_SIZE_MAX { return false; }
         QUEUE_SIZE = queue_size;
-        core::ptr::write_bytes(addr_of_mut!(QUEUE).cast::<u8>(), 0, 8192);
+
+        // Legacy virtqueue layout depends on the device-advertised queue size:
+        // descriptors, available ring, then used ring aligned to 4096 bytes.
+        AVAILABLE_OFFSET = 16 * queue_size as usize;
+        let available_end = AVAILABLE_OFFSET + 6 + 2 * queue_size as usize;
+        USED_OFFSET = align_up(available_end, 4096);
+        let used_end = USED_OFFSET + 6 + 8 * queue_size as usize;
+        if used_end > QUEUE_MEMORY_SIZE { return false; }
+
+        core::ptr::write_bytes(addr_of_mut!(QUEUE).cast::<u8>(), 0, QUEUE_MEMORY_SIZE);
+        AVAILABLE_INDEX = 0;
+        LAST_USED_INDEX = 0;
+
         let queue_physical = addr_of!(QUEUE) as u64;
-        if queue_physical & 0xfff != 0 || queue_physical > u32::MAX as u64 * 4096 { return false; }
+        if queue_physical & 0xfff != 0 || queue_physical > u32::MAX as u64 * 4096 {
+            return false;
+        }
         outl(io_base + 8, (queue_physical >> 12) as u32);
         outb(io_base + 18, 7);
         READY = inb(io_base + 18) & 0x80 == 0;
@@ -76,14 +93,14 @@ pub fn read_sector(sector: u64, output: &mut [u8; 512]) -> bool {
 
         let queue = addr_of_mut!(QUEUE).cast::<u8>();
         let ring_slot = AVAILABLE_INDEX % QUEUE_SIZE;
-        write_u16(queue.add(4 + ring_slot as usize * 2), 0);
+        write_u16(queue.add(AVAILABLE_OFFSET + 4 + ring_slot as usize * 2), 0);
         fence(Ordering::Release);
         AVAILABLE_INDEX = AVAILABLE_INDEX.wrapping_add(1);
-        write_u16(queue.add(2), AVAILABLE_INDEX);
+        write_u16(queue.add(AVAILABLE_OFFSET + 2), AVAILABLE_INDEX);
         outw(IO_BASE + 16, 0);
 
         let mut spins = 0usize;
-        while read_u16(queue.add(QUEUE_USED_OFFSET + 2)) == LAST_USED_INDEX {
+        while read_u16(queue.add(USED_OFFSET + 2)) == LAST_USED_INDEX {
             core::hint::spin_loop();
             spins += 1;
             if spins == 50_000_000 { return false; }
@@ -104,8 +121,13 @@ unsafe fn write_descriptor(index: usize, address: u64, length: u32, flags: u16, 
     core::ptr::write_unaligned(pointer.add(14).cast::<u16>(), next);
 }
 
-unsafe fn write_u16(pointer: *mut u8, value: u16) { core::ptr::write_volatile(pointer.cast::<u16>(), value); }
-unsafe fn read_u16(pointer: *mut u8) -> u16 { core::ptr::read_volatile(pointer.cast::<u16>()) }
+unsafe fn write_u16(pointer: *mut u8, value: u16) {
+    core::ptr::write_volatile(pointer.cast::<u16>(), value);
+}
+
+unsafe fn read_u16(pointer: *mut u8) -> u16 {
+    core::ptr::read_volatile(pointer.cast::<u16>())
+}
 
 fn find_device() -> Option<(u8, u8, u8)> {
     for bus in 0u16..=255 {
@@ -131,6 +153,10 @@ fn pci_write(bus: u8, device: u8, function: u8, offset: u8, value: u32) {
     let address = 0x8000_0000u32 | ((bus as u32) << 16) | ((device as u32) << 11)
         | ((function as u32) << 8) | (offset as u32 & 0xfc);
     unsafe { outl(0xcf8, address); outl(0xcfc, value); }
+}
+
+const fn align_up(value: usize, alignment: usize) -> usize {
+    (value + alignment - 1) & !(alignment - 1)
 }
 
 unsafe fn inb(port: u16) -> u8 { let value: u8; asm!("in al, dx", in("dx") port, out("al") value, options(nomem, nostack)); value }
