@@ -13,7 +13,7 @@
 - [ ] Добавить spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
 - [ ] Убрать глобальные `static mut` из горячих подсистем.
 - [ ] Реализовать нормальное освобождение физических фреймов.
-- [ ] Добавить kernel log, serial output в COM1 и уровни log severity.
+- [x] Добавить kernel log, serial output в COM1 и уровни log severity.
 - [ ] Добавить symbol table/backtrace для panic screen.
 - [ ] Создать QEMU smoke tests: boot, exceptions, heap, scheduler, disk, keyboard.
 
