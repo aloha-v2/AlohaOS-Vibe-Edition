@@ -1,66 +1,44 @@
 name: AlohaOS CI
-
 on:
   push:
     branches: [main, "brain/**"]
   pull_request:
-
 permissions:
   contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Install Rust targets
-        run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
-      - name: Build AlohaBoot and kernel
-        shell: bash
+      - run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build
         run: |
-          set +e
-          cargo build --release --target x86_64-unknown-uefi -p alohaboot 2>&1 | tee boot-build.log
-          boot=${PIPESTATUS[0]}
-          cargo build --release --target x86_64-unknown-none -p kernel 2>&1 | tee kernel-build.log
-          kernel=${PIPESTATUS[0]}
-          if [ "$boot" -ne 0 ] || [ "$kernel" -ne 0 ]; then
-            message=$(cat boot-build.log kernel-build.log | tail -n 80 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
-            echo "::error title=Rust build failed::$message"
-            exit 1
-          fi
-
+          cargo build --release --target x86_64-unknown-uefi -p alohaboot
+          cargo build --release --target x86_64-unknown-none -p kernel
   qemu-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-      - name: Install QEMU, OVMF and Rust targets
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 ovmf
           rustup target add x86_64-unknown-uefi x86_64-unknown-none
-      - name: Build ESP
-        run: make esp PROFILE=release
+      - run: make esp PROFILE=release
       - name: Boot for 15 seconds
         shell: bash
         run: |
-          if [ -f /usr/share/OVMF/OVMF_CODE.fd ]; then
-            OVMF=/usr/share/OVMF/OVMF_CODE.fd
-          else
-            OVMF=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' ! -name '*secboot*' ! -name '*ms*' | head -n 1)
-          fi
+          for candidate in /usr/share/OVMF/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE_2M.fd; do
+            if [ -f "$candidate" ]; then OVMF="$candidate"; break; fi
+          done
           test -n "$OVMF"
           set +e
           timeout 15s qemu-system-x86_64 \
-            -machine q35 \
-            -m 256M \
-            -bios "$OVMF" \
+            -machine q35 -m 256M -bios "$OVMF" \
             -drive "format=raw,file=fat:rw:esp" \
-            -display none \
-            -monitor none \
-            -serial file:serial.log \
-            -net none \
-            -no-reboot >qemu.log 2>&1
+            -display none -monitor none -serial file:serial.log \
+            -net none -no-reboot >qemu.log 2>&1
           status=$?
           set -e
           cat qemu.log
@@ -71,7 +49,4 @@ jobs:
             exit 1
           fi
           grep -q "interrupts enabled, starting shell" serial.log
-          if grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' serial.log; then
-            echo "::error title=Kernel fault detected::Serial output contains a fatal error"
-            exit 1
-          fi
+          ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' serial.log
