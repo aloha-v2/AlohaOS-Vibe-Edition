@@ -6,7 +6,8 @@
 - [x] Lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
 - [x] Guarded kernel stack infrastructure.
 - [ ] Preemptive round-robin и часовой stress-test.
-- [ ] Переписать switch path как строгий assembly trampoline на dedicated scheduler/IST stack.
+- [x] Dedicated scheduler/timer IST stack.
+- [ ] Переписать switch path как строгий assembly trampoline.
 - [ ] Spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
 - [ ] Убрать `static mut` из горячих подсистем.
 - [ ] Освобождение физических фреймов.
@@ -14,27 +15,11 @@
 - [ ] Backtrace для panic screen.
 - [ ] QEMU tests: exceptions, heap, scheduler, disk, keyboard.
 
-**Важно:** hardware test на Windows/QEMU поймал Double Fault. Пункт scheduler не считается выполненным до стабильного stress-test.
-
-## 2. ACPI/APIC
-
-- [ ] RSDP, ACPI tables, Local APIC, I/O APIC, HPET, SMP, reboot/shutdown, PCIe.
-
-## 3. Ring 3
-
-- [ ] User descriptors, TSS RSP0, user PML4, syscalls, ELF loader и user shell.
-
-## 4. VFS
-
-- [ ] VFS API, writable FAT32, LFN, subdirectories, cache и crash-safe writes.
-
-## 5. Devices
-
-- [ ] Device manager, improved VirtIO, mouse, GPU, EDID и RTC.
+**Важно:** hardware test на Windows/QEMU поймал Double Fault. Round-robin не считается выполненным до стабильного stress-test.
 
 ## Ближайшие задачи
 
-1. Dedicated scheduler interrupt stack.
+1. Проверить timer IST со стабильным gated scheduler.
 2. Assembly-only context switch trampoline.
 3. Hardware stress-test без Double Fault.
 4. IRQ-safe synchronization.
