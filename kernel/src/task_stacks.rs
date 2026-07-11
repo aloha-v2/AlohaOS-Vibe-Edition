@@ -1,99 +1,10 @@
-//! Per-task kernel stacks mapped into a dedicated virtual address range.
-//!
-//! Every stack starts after an intentionally unmapped 4 KiB guard page. A
-//! downward stack overflow therefore faults before it can corrupt another task.
-
-use core::arch::asm;
-use core::ptr;
-use core::sync::atomic::{AtomicU64, Ordering};
-
-use crate::memory;
-
-pub const TASK_COUNT: usize = 2;
-pub const STACK_PAGES: u64 = 4;
-pub const STACK_SIZE: u64 = STACK_PAGES * memory::FRAME_SIZE;
-const REGION_PAGES: u64 = STACK_PAGES + 1;
-const STACK_VIRTUAL_BASE: u64 = 0xffff_fe00_0000_0000;
-const ENTRY_COUNT: usize = 512;
-const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
-const PRESENT: u64 = 1 << 0;
-const WRITABLE: u64 = 1 << 1;
-
-#[repr(C, align(4096))]
-struct PageTable {
- entries: [u64; ENTRY_COUNT],
-}
-
-static STACK_TOPS: [AtomicU64; TASK_COUNT] = [AtomicU64::new(0), AtomicU64::new(0)];
-static GUARD_STARTS: [AtomicU64; TASK_COUNT] = [AtomicU64::new(0), AtomicU64::new(0)];
-
-pub fn init() -> bool {
- for task in 0..TASK_COUNT {
-  let guard = STACK_VIRTUAL_BASE + task as u64 * REGION_PAGES * memory::FRAME_SIZE;
-  let physical = match memory::allocate_contiguous(STACK_PAGES) {
-   Some(value) => value,
-   None => return false,
-  };
-
-  // The guard address is never mapped. Only the pages above it receive PTEs.
-  for page in 0..STACK_PAGES {
-   let virtual_address = guard + memory::FRAME_SIZE * (page + 1);
-   let physical_address = physical + memory::FRAME_SIZE * page;
-   if unsafe { !map_page(virtual_address, physical_address) } {
-    return false;
-   }
-  }
-
-  GUARD_STARTS[task].store(guard, Ordering::Release);
-  STACK_TOPS[task].store(guard + REGION_PAGES * memory::FRAME_SIZE, Ordering::Release);
- }
- true
-}
-
-pub fn stack_top(task: usize) -> Option<u64> {
- let value = STACK_TOPS.get(task)?.load(Ordering::Acquire);
- (value != 0).then_some(value)
-}
-
-pub fn guard_start(task: usize) -> Option<u64> {
- let value = GUARD_STARTS.get(task)?.load(Ordering::Acquire);
- (value != 0).then_some(value)
-}
-
-unsafe fn map_page(virtual_address: u64, physical_address: u64) -> bool {
- let cr3 = read_cr3() & ADDRESS_MASK;
- let indices = [
-  ((virtual_address >> 39) & 0x1ff) as usize,
-  ((virtual_address >> 30) & 0x1ff) as usize,
-  ((virtual_address >> 21) & 0x1ff) as usize,
- ];
-
- let mut table_frame = cr3;
- for index in indices {
-  let table = &mut *(table_frame as *mut PageTable);
-  let entry = table.entries[index];
-  if entry & PRESENT == 0 {
-   let Some(frame) = memory::allocate_frame() else { return false };
-   ptr::write_bytes(frame as *mut u8, 0, memory::FRAME_SIZE as usize);
-   table.entries[index] = frame | PRESENT | WRITABLE;
-   table_frame = frame;
-  } else {
-   table_frame = entry & ADDRESS_MASK;
-  }
- }
-
- let table = &mut *(table_frame as *mut PageTable);
- let index = ((virtual_address >> 12) & 0x1ff) as usize;
- if table.entries[index] & PRESENT != 0 {
-  return false;
- }
- table.entries[index] = physical_address | PRESENT | WRITABLE;
- asm!("invlpg [{}]", in(reg) virtual_address, options(nostack, preserves_flags));
- true
-}
-
-fn read_cr3() -> u64 {
- let value: u64;
- unsafe { asm!("mov {}, cr3", out(reg) value, options(nomem, nostack, preserves_flags)) };
- value
-}
+//! Per-task kernel stacks with an unmapped lower guard and mapped ABI headroom.
+use core::arch::asm;use core::ptr;use core::sync::atomic::{AtomicU64,Ordering};use crate::memory;
+pub const TASK_COUNT:usize=2;pub const STACK_PAGES:u64=4;pub const STACK_SIZE:u64=(STACK_PAGES-1)*memory::FRAME_SIZE;const REGION_PAGES:u64=STACK_PAGES+1;const STACK_VIRTUAL_BASE:u64=0xffff_fe00_0000_0000;const ENTRY_COUNT:usize=512;const ADDRESS_MASK:u64=0x000f_ffff_ffff_f000;const PRESENT:u64=1;const WRITABLE:u64=2;
+#[repr(C,align(4096))]struct PageTable{entries:[u64;ENTRY_COUNT]}
+static STACK_TOPS:[AtomicU64;TASK_COUNT]=[AtomicU64::new(0),AtomicU64::new(0)];static GUARD_STARTS:[AtomicU64;TASK_COUNT]=[AtomicU64::new(0),AtomicU64::new(0)];
+pub fn init()->bool{for task in 0..TASK_COUNT{let guard=STACK_VIRTUAL_BASE+task as u64*REGION_PAGES*memory::FRAME_SIZE;let physical=match memory::allocate_contiguous(STACK_PAGES){Some(v)=>v,None=>return false};for page in 0..STACK_PAGES{let va=guard+memory::FRAME_SIZE*(page+1);let pa=physical+memory::FRAME_SIZE*page;if unsafe{!map_page(va,pa)}{return false}}GUARD_STARTS[task].store(guard,Ordering::Release);/* Keep the highest mapped page as ABI/interrupt headroom. The logical stack top is one page below the mapping end, so speculative or compiler-generated positive RSP offsets remain mapped. */let top=guard+STACK_PAGES*memory::FRAME_SIZE;STACK_TOPS[task].store(top,Ordering::Release)}true}
+pub fn stack_top(task:usize)->Option<u64>{let v=STACK_TOPS.get(task)?.load(Ordering::Acquire);(v!=0).then_some(v)}pub fn guard_start(task:usize)->Option<u64>{let v=GUARD_STARTS.get(task)?.load(Ordering::Acquire);(v!=0).then_some(v)}
+pub unsafe fn enter(task:usize,entry:extern "C" fn()->!)->!{let top=stack_top(task).expect("task stack not initialized");asm!("mov rsp, {top}","and rsp, -16","sub rsp, 8","lea rax, [rip + 2f]","mov [rsp], rax","jmp {entry}","2:","ud2",top=in(reg)top,entry=in(reg)entry,options(noreturn))}
+unsafe fn map_page(va:u64,pa:u64)->bool{let cr3=read_cr3()&ADDRESS_MASK;let indices=[((va>>39)&0x1ff)as usize,((va>>30)&0x1ff)as usize,((va>>21)&0x1ff)as usize];let mut frame=cr3;for index in indices{let table=&mut*(frame as *mut PageTable);let entry=table.entries[index];if entry&PRESENT==0{let Some(new)=memory::allocate_frame()else{return false};ptr::write_bytes(new as *mut u8,0,memory::FRAME_SIZE as usize);table.entries[index]=new|PRESENT|WRITABLE;frame=new}else{frame=entry&ADDRESS_MASK}}let table=&mut*(frame as *mut PageTable);let index=((va>>12)&0x1ff)as usize;if table.entries[index]&PRESENT!=0{return false}table.entries[index]=pa|PRESENT|WRITABLE;asm!("invlpg [{}]",in(reg)va,options(nostack,preserves_flags));true}
+fn read_cr3()->u64{let v:u64;unsafe{asm!("mov {}, cr3",out(reg)v,options(nomem,nostack,preserves_flags))};v}

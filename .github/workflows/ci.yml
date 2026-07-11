@@ -1,24 +1,82 @@
 name: AlohaOS CI
-
 on:
   push:
     branches: [main, "brain/**"]
   pull_request:
-
 permissions:
   contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install Rust toolchain and targets
-        run: |
-          rustup show
+      - uses: actions/checkout@v5
+      - run: rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - run: |
+          cargo build --release --target x86_64-unknown-uefi -p alohaboot
+          cargo build --release --target x86_64-unknown-none -p kernel
+  qemu-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
           rustup target add x86_64-unknown-uefi x86_64-unknown-none
-      - name: Build AlohaBoot
-        run: cargo build --release --target x86_64-unknown-uefi -p alohaboot
-      - name: Build kernel
-        run: cargo build --release --target x86_64-unknown-none -p kernel
+      - name: Build ESP and FAT32 test disk
+        run: |
+          make esp PROFILE=release
+          mkdir -p disk
+          python3 scripts/create-fat32.py disk/aloha-fat32.img
+          test -s disk/aloha-fat32.img
+      - name: Boot shell, timer IST and FAT32
+        shell: bash
+        run: |
+          OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
+          set +e
+          timeout 15s qemu-system-x86_64 -machine q35 -cpu max -m 256M \
+            -drive "if=pflash,format=raw,readonly=on,file=$OVMF" \
+            -drive "format=raw,file=fat:rw:esp" \
+            -drive "if=none,id=aloha-disk,format=raw,file=disk/aloha-fat32.img" \
+            -device "virtio-blk-pci,drive=aloha-disk,disable-modern=on" \
+            -display none -monitor none -serial file:serial.log -net none -no-reboot
+          status=$?
+          set -e
+          cat serial.log
+          test "$status" -eq 124
+          grep -q "interrupts enabled, starting shell" serial.log
+          grep -q "storage: virtio_blk=true, fat32=true" serial.log
+          ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' serial.log
+  scheduler-stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build stress kernel and FAT32 disk
+        run: |
+          make esp PROFILE=release KERNEL_FEATURES=scheduler-stress
+          mkdir -p disk
+          python3 scripts/create-fat32.py disk/aloha-fat32.img
+      - name: Run scheduler for 60 seconds
+        shell: bash
+        run: |
+          OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
+          set +e
+          timeout 60s qemu-system-x86_64 -machine q35 -cpu max -m 256M \
+            -drive "if=pflash,format=raw,readonly=on,file=$OVMF" \
+            -drive "format=raw,file=fat:rw:esp" \
+            -drive "if=none,id=aloha-disk,format=raw,file=disk/aloha-fat32.img" \
+            -device "virtio-blk-pci,drive=aloha-disk,disable-modern=on" \
+            -display none -monitor none -serial file:stress.log -net none -no-reboot
+          status=$?
+          set -e
+          cat stress.log
+          test "$status" -eq 124
+          grep -q "scheduler-stress: preemption enabled" stress.log
+          grep -q "scheduler-stress: worker heartbeat 100" stress.log
+          grep -q "storage: virtio_blk=true, fat32=true" stress.log
+          ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' stress.log
