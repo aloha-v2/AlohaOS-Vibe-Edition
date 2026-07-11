@@ -11,8 +11,8 @@
 - [x] Runtime gate `sched on|off`, по умолчанию выключен.
 - [x] Hardware smoke: обе задачи 588 switches, worker heartbeat 588, shell и FAT32 живы.
 - [x] Автоматический 60-секундный QEMU scheduler stress без Double Fault.
-- [ ] Часовой `Scheduler one-hour stress`: запущен, ожидается результат.
-- [ ] Включить preemptive round-robin по умолчанию после зелёного часового теста.
+- [x] Часовой `Scheduler one-hour stress`: 3600 секунд без Double Fault, panic и storage errors.
+- [ ] Включить preemptive round-robin по умолчанию.
 - [x] IRQ-safe spinlock primitive и миграция COM1 logger.
 - [ ] Mutex, semaphore и wait queue.
 - [ ] Мигрировать heap/device shared state на IRQ-safe primitives.
@@ -20,7 +20,7 @@
 - [ ] Освобождение физических фреймов.
 - [x] COM1 kernel log и severity.
 - [ ] Backtrace для panic screen.
-- [ ] Полный QEMU test suite; build, boot/timer/FAT32 smoke и 60s scheduler stress работают.
+- [ ] Полный QEMU test suite; build, boot/timer/FAT32 smoke, 60s и one-hour scheduler stress работают.
 
 ## 2. ACPI/APIC
 
@@ -43,13 +43,13 @@
 - Shell загружается без panic.
 - Timer IST стабилен, scheduling ticks растут.
 - Gated round-robin: task 0 и task 1 по 588 switches, worker heartbeat 588.
-- Автоматический 60s stress проходит без Double Fault.
+- Автоматические 60s и 3600s stress-тесты проходят без Double Fault.
 - VirtIO Block и FAT32 online после включения scheduler.
 - `ls /` видит `HELLO.TXT`, `cat hello.txt` читает файл.
 
 ## Ближайшие задачи
 
-1. Дождаться результата часового scheduler stress-test.
+1. Включить preemptive round-robin по умолчанию.
 2. Мигрировать heap lock на общий IRQ-safe primitive.
 3. Добавить mutex, semaphore и wait queue.
 4. Physical frame deallocation.
