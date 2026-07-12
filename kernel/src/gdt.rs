@@ -1,4 +1,4 @@
-//! Long-mode GDT and TSS with dedicated double-fault and scheduler IST stacks.
+//! Long-mode GDT and TSS with Ring 0/Ring 3 segments and dedicated stacks.
 //!
 //! Descriptor storage is written exactly once during single-core boot, before
 //! interrupts are enabled, then remains pinned for the lifetime of the kernel.
@@ -10,9 +10,14 @@ use core::ptr::{addr_of, addr_of_mut};
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const KERNEL_CODE_SELECTOR: u16 = 0x08;
+const KERNEL_DATA_SELECTOR: u16 = 0x10;
+const USER_DATA_SELECTOR: u16 = 0x18 | 3;
+const USER_CODE_SELECTOR: u16 = 0x20 | 3;
+const TSS_SELECTOR: u16 = 0x28;
 const DOUBLE_FAULT_IST_INDEX: u8 = 1;
 const SCHEDULER_IST_INDEX: u8 = 2;
 const INTERRUPT_STACK_SIZE: usize = 20 * 1024;
+const RSP0_STACK_SIZE: usize = 32 * 1024;
 
 #[repr(C, packed)]
 struct TaskStateSegment {
@@ -40,6 +45,9 @@ impl TaskStateSegment {
 #[repr(C, align(16))]
 struct InterruptStack([u8; INTERRUPT_STACK_SIZE]);
 
+#[repr(C, align(16))]
+struct PrivilegeStack([u8; RSP0_STACK_SIZE]);
+
 #[repr(C, packed)]
 struct GdtPointer {
     limit: u16,
@@ -47,24 +55,24 @@ struct GdtPointer {
 }
 
 #[repr(C, align(16))]
-struct AlignedGdt([u64; 5]);
+struct AlignedGdt([u64; 7]);
 
 struct DescriptorStorage {
     double_fault_stack: UnsafeCell<InterruptStack>,
     scheduler_stack: UnsafeCell<InterruptStack>,
+    rsp0_stack: UnsafeCell<PrivilegeStack>,
     tss: UnsafeCell<TaskStateSegment>,
     gdt: UnsafeCell<AlignedGdt>,
 }
 
-// Boot initialization is single-threaded and INIT prevents a second writer.
-// After `init`, the CPU only reads this pinned, system-lifetime storage.
 unsafe impl Sync for DescriptorStorage {}
 
 static STORAGE: DescriptorStorage = DescriptorStorage {
     double_fault_stack: UnsafeCell::new(InterruptStack([0; INTERRUPT_STACK_SIZE])),
     scheduler_stack: UnsafeCell::new(InterruptStack([0; INTERRUPT_STACK_SIZE])),
+    rsp0_stack: UnsafeCell::new(PrivilegeStack([0; RSP0_STACK_SIZE])),
     tss: UnsafeCell::new(TaskStateSegment::ZERO),
-    gdt: UnsafeCell::new(AlignedGdt([0; 5])),
+    gdt: UnsafeCell::new(AlignedGdt([0; 7])),
 };
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -74,6 +82,10 @@ pub fn init() {
     }
 
     unsafe {
+        let mut privilege_stacks = [0u64; 3];
+        privilege_stacks[0] = addr_of!(*STORAGE.rsp0_stack.get()) as u64
+            + size_of::<PrivilegeStack>() as u64;
+
         let mut interrupt_stacks = [0u64; 7];
         interrupt_stacks[(DOUBLE_FAULT_IST_INDEX - 1) as usize] =
             addr_of!(*STORAGE.double_fault_stack.get()) as u64
@@ -83,6 +95,7 @@ pub fn init() {
                 + size_of::<InterruptStack>() as u64;
 
         addr_of_mut!(*STORAGE.tss.get()).write(TaskStateSegment {
+            privilege_stack_table: privilege_stacks,
             interrupt_stack_table: interrupt_stacks,
             ..TaskStateSegment::ZERO
         });
@@ -91,14 +104,16 @@ pub fn init() {
         let tss_limit = (size_of::<TaskStateSegment>() - 1) as u64;
         let gdt = &mut *STORAGE.gdt.get();
         gdt.0[0] = 0;
-        gdt.0[1] = 0x00af_9a00_0000_ffff;
-        gdt.0[2] = 0x00cf_9200_0000_ffff;
-        gdt.0[3] = (tss_limit & 0xffff)
+        gdt.0[1] = 0x00af_9a00_0000_ffff; // Ring 0 code
+        gdt.0[2] = 0x00cf_9200_0000_ffff; // Ring 0 data
+        gdt.0[3] = 0x00cf_f200_0000_ffff; // Ring 3 data
+        gdt.0[4] = 0x00af_fa00_0000_ffff; // Ring 3 code
+        gdt.0[5] = (tss_limit & 0xffff)
             | ((tss_base & 0x00ff_ffff) << 16)
             | (0x89u64 << 40)
             | (((tss_limit >> 16) & 0x0f) << 48)
             | (((tss_base >> 24) & 0xff) << 56);
-        gdt.0[4] = tss_base >> 32;
+        gdt.0[6] = tss_base >> 32;
 
         let pointer = GdtPointer {
             limit: (size_of::<AlignedGdt>() - 1) as u16,
@@ -118,7 +133,7 @@ pub fn init() {
             "xor eax, eax",
             "mov fs, ax",
             "mov gs, ax",
-            "mov ax, 0x18",
+            "mov ax, 0x28",
             "ltr ax",
             out("rax") _,
         );
@@ -127,6 +142,22 @@ pub fn init() {
 
 pub const fn code_selector() -> u16 {
     KERNEL_CODE_SELECTOR
+}
+
+pub const fn kernel_data_selector() -> u16 {
+    KERNEL_DATA_SELECTOR
+}
+
+pub const fn user_code_selector() -> u16 {
+    USER_CODE_SELECTOR
+}
+
+pub const fn user_data_selector() -> u16 {
+    USER_DATA_SELECTOR
+}
+
+pub fn rsp0() -> u64 {
+    unsafe { addr_of!((*STORAGE.tss.get()).privilege_stack_table[0]).read_unaligned() }
 }
 
 pub const fn double_fault_ist() -> u8 {
