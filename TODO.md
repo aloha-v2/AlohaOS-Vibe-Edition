@@ -10,17 +10,41 @@
 
 ## M1 Userland: процессы, Ring 3 и syscalls
 
+### Memory и process foundation
+
 - [x] Ring 3 code/data descriptors и TSS `RSP0`.
-- [x] Отдельный PML4 root и выделенный user virtual region для процесса.
+- [x] Отдельный PML4 root и выделенный user virtual region.
 - [x] USER mappings с W^X: executable code read-only, writable data/stack NX.
-- [ ] Безопасное переключение CR3 между kernel task и process address space.
-- [ ] Первый вход в Ring 3 через `iretq` и возврат в kernel только через контролируемый trap.
-- [ ] Настроить `syscall/sysret`: STAR/LSTAR/FMASK, canonical address checks и отдельный kernel entry stack.
-- [ ] Минимальные syscalls: `write`, `exit`, `sleep`; затем `read`, `open`, `close`, `stat`, `mmap`, `spawn`, `wait`.
-- [ ] Проверять каждый user pointer, длину, overflow и границы mappings до чтения/записи kernel.
-- [ ] Process structure: PID, state, CR3, kernel stack, user stack, handles и exit code.
-- [ ] ELF64 loader: validate headers/segments, enforce W^X, zero BSS, reject malformed binaries.
-- [ ] Изолировать user page fault/invalid opcode: завершать только процесс, не kernel.
+- [x] Interrupt-safe CR3 activation guard с гарантированным возвратом в kernel CR3.
+- [x] Проверка canonical user ranges, overflow, page presence, USER и writable flags.
+- [x] `copy_from_user`/`copy_to_user` через несколько страниц без прямого dereference user pointer.
+- [x] Базовая Process structure: PID, lifecycle, CR3/address space, entry, user stack и exit code.
+
+### Первый запуск user mode
+
+- [ ] User image builder: скопировать минимальный machine code в read-only executable mapping.
+- [ ] Подготовить aligned user stack, argc/env ABI пока не нужен.
+- [ ] Реализовать `iretq` trampoline с CS/SS RPL3, RFLAGS.IF, user RIP/RSP.
+- [ ] Добавить контролируемый software trap для первого возврата user to kernel.
+- [ ] Проверить, что kernel entry реально использует TSS `RSP0`, а user stack остаётся изолирован.
+- [ ] Добавить QEMU `ring3-smoke`: user code выполняется, печатает marker через trap и завершается.
+
+### Syscall path
+
+- [ ] Настроить EFER.SCE, STAR, LSTAR и FMASK.
+- [ ] Assembly entry должен сохранить user RSP/RCX/R11 и перейти на process kernel stack до Rust.
+- [ ] Проверять canonical RIP/RSP перед `sysretq`; при сомнении возвращаться через `iretq`.
+- [ ] Реализовать `write`, `exit`, `sleep`, затем `read/open/close/stat/mmap/spawn/wait`.
+- [ ] Запретить kernel pointers, integer overflow, unmapped ranges и cross-page partial access.
+- [ ] Добавить syscall rate/error accounting и понятные errno values.
+
+### ELF и isolation
+
+- [ ] ELF64 loader: validate magic/class/machine/type/program headers и bounds.
+- [ ] Мапить PT_LOAD, enforce W^X, zero BSS и отвергать overlapping/malformed segments.
+- [ ] Process table: PID allocation, parent/child, handles, waiters и cleanup после exit.
+- [ ] User page fault/invalid opcode должны завершать только процесс.
+- [ ] Добавить negative tests: bad pointer, NX execution, write-to-code, stack overflow, malformed ELF.
 - [ ] Перенести shell из Ring 0 в user space.
 
 **M1 готов, когда:** user ELF печатает текст, читает файл, sleep/wait работает, а его crash не валит kernel.
@@ -42,10 +66,9 @@
 
 После стабильных process ABI, VFS и drivers: IPC/shared memory, compositor, GUI toolkit, desktop shell, apps, settings, package format и hardening.
 
-## Ближайшие задачи
+## Следующий пакет работ
 
-1. Добавить safe CR3 activation guard и проверить возврат в kernel address space.
-2. Подготовить минимальные user code/stack mappings и `iretq` trampoline.
-3. Настроить syscall entry с `write`, `exit`, `sleep` и user-pointer validation.
-4. Добавить Process/ELF loader и crash isolation tests.
-5. Перенести shell в user space, затем начать VFS.
+1. User image + stack mappings и `iretq` Ring 3 trampoline.
+2. Контролируемый trap обратно в kernel и `ring3-smoke`.
+3. Syscall MSRs, entry stack и `write/exit/sleep`.
+4. Process table + ELF loader + crash isolation.
