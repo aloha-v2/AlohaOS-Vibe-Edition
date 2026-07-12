@@ -138,6 +138,10 @@ extern "C" fn task_returned() -> ! {
     }
 }
 
+pub fn current_task() -> usize {
+    CURRENT.load(Ordering::Acquire)
+}
+
 pub fn state(task: usize) -> Option<TaskState> {
     STATES
         .get(task)
@@ -155,6 +159,25 @@ pub fn block(task: usize) -> bool {
     }
     transition(task, TaskState::Ready, TaskState::Blocked)
         || transition(task, TaskState::Running, TaskState::Blocked)
+}
+
+/// Block the calling task until another task wakes it.
+///
+/// The loop tolerates unrelated interrupts before the timer gets a chance to
+/// switch stacks. The function returns only after the scheduler marks this task
+/// Running again.
+pub fn park_current() -> bool {
+    let task = current_task();
+    if !block(task) {
+        return false;
+    }
+    loop {
+        match state(task) {
+            Some(TaskState::Running) => return true,
+            Some(TaskState::Dead) | None => return false,
+            _ => unsafe { asm!("sti", "hlt", options(nomem, nostack)) },
+        }
+    }
 }
 
 pub fn sleep_until(task: usize, wake_tick: u64) -> bool {
