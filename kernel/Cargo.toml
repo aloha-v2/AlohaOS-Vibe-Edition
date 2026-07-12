@@ -13,6 +13,9 @@ syscall-smoke = []
 elf-smoke = []
 user-ud-smoke = []
 user-nx-smoke = []
+user-write-code-smoke = []
+user-stack-guard-smoke = []
+user-bad-pointer-smoke = []
 
 [[bin]]
 name = "kernel"
