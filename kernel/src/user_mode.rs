@@ -19,15 +19,22 @@ unsafe extern "C" {
 pub fn run(process: &mut Process) -> u64 {
     LAST_MARKER.store(NO_MARKER, Ordering::Release);
     process.mark_running();
-    let _address_space = process.address_space.activate();
-    unsafe {
-        aloha_enter_user(
-            process.entry,
-            process.user_stack_top,
-            gdt::user_code_selector() as u64,
-            gdt::user_data_selector() as u64,
-        );
+
+    // Keep the immutable address-space borrow in its own scope. The guard must
+    // restore kernel CR3 and drop before Process state is mutated below.
+    {
+        let address_space_guard = process.address_space.activate();
+        unsafe {
+            aloha_enter_user(
+                process.entry,
+                process.user_stack_top,
+                gdt::user_code_selector() as u64,
+                gdt::user_data_selector() as u64,
+            );
+        }
+        drop(address_space_guard);
     }
+
     let marker = LAST_MARKER.load(Ordering::Acquire);
     if marker == NO_MARKER {
         process.fault();
@@ -47,7 +54,7 @@ global_asm!(r#"
 .align 8
 .global ALOHA_USER_RETURN_RSP
 ALOHA_USER_RETURN_RSP:
-    .quad 0
+    .zero 8
 
 .section .text
 .global aloha_enter_user
