@@ -15,7 +15,7 @@
 - Preemptive round-robin включён по умолчанию и прошёл часовой QEMU stress без Double Fault.
 - IRQ-safe spinlock, scheduler-aware mutex, semaphore и wait queue.
 - Allocation-free COM1 logger с уровнями DEBUG, INFO и ERROR.
-- Framebuffer console хранит cursor/color/device state под IRQ-safe lock.
+- Горячие подсистемы и descriptor tables больше не используют `static mut`.
 - Legacy VirtIO Block сериализует DMA queue и request state через scheduler-aware mutex.
 - Read-only FAT32: `ls /`, `cat hello.txt`; mount state защищён IRQ-safe lock.
 - Shell: history, `help`, `clear`, `meminfo`, `uptime`, `tasks`, `sched`, `ls`, `cat`, `reboot`.
@@ -44,7 +44,7 @@ meminfo
 
 ## Текущий этап: M0 Kernel Stable
 
-Основной scheduler готов. До закрытия M0 осталось убрать небезопасный mutable state из GDT/IDT descriptor tables, добавить panic backtrace и расширить QEMU smoke tests на exceptions, heap и keyboard.
+Scheduler, memory reclamation и shared-state cleanup готовы. До закрытия M0 осталось добавить panic backtrace и расширить QEMU smoke tests на exceptions, heap и keyboard.
 
 После M0: Ring 3, отдельные address spaces, минимальные syscalls и перенос shell в user space. Не начинаем desktop поверх нестабильного ядра, это путь в цирк с Double Fault.
 
