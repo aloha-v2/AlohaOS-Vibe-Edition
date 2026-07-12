@@ -1,29 +1,19 @@
 //! First controlled Ring 3 round-trip for AlohaOS.
 //!
 //! A tiny user image runs under its process CR3 and returns only through the
-//! DPL3 software trap at vector 0x80. The trap switches to TSS RSP0, records the
-//! marker and resumes the suspended kernel call frame. This is a bootstrap
-//! path; the real syscall ABI will replace the single global return slot.
+//! DPL3 software trap at vector 0x80. Bootstrap stack bookkeeping stays wholly
+//! in assembly; Rust only records the marker and updates process state.
 
 use core::arch::global_asm;
-use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{gdt, process::Process};
 
 const NO_MARKER: u64 = u64::MAX;
-
-#[repr(transparent)]
-pub struct ReturnSlot(UnsafeCell<u64>);
-unsafe impl Sync for ReturnSlot {}
-
-#[no_mangle]
-pub static ALOHA_USER_RETURN_RSP: ReturnSlot = ReturnSlot(UnsafeCell::new(0));
 static LAST_MARKER: AtomicU64 = AtomicU64::new(NO_MARKER);
 
 unsafe extern "C" {
     fn aloha_enter_user(rip: u64, rsp: u64, code_selector: u64, data_selector: u64);
-    fn aloha_return_kernel(return_rsp: u64) -> !;
 }
 
 pub fn run(process: &mut Process) -> u64 {
@@ -48,13 +38,18 @@ pub fn run(process: &mut Process) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn rust_user_trap(marker: u64) -> ! {
+pub extern "C" fn rust_user_trap(marker: u64) {
     LAST_MARKER.store(marker, Ordering::Release);
-    let return_rsp = unsafe { *ALOHA_USER_RETURN_RSP.0.get() };
-    unsafe { aloha_return_kernel(return_rsp) }
 }
 
 global_asm!(r#"
+.section .bss
+.align 8
+.global ALOHA_USER_RETURN_RSP
+ALOHA_USER_RETURN_RSP:
+    .quad 0
+
+.section .text
 .global aloha_enter_user
 .type aloha_enter_user,@function
 aloha_enter_user:
@@ -69,15 +64,4 @@ aloha_enter_user:
     push rdi
     iretq
 .size aloha_enter_user, .-aloha_enter_user
-
-.global aloha_return_kernel
-.type aloha_return_kernel,@function
-aloha_return_kernel:
-    mov ax, 0x10
-    mov ds, ax
-    mov es, ax
-    mov ss, ax
-    mov rsp, rdi
-    ret
-.size aloha_return_kernel, .-aloha_return_kernel
 "#);

@@ -12,10 +12,10 @@ pub const USER_TRAP_VECTOR: usize = 0x80;
 #[repr(C, packed)]
 struct IdtEntry { offset_low:u16, selector:u16, ist:u8, attributes:u8, offset_middle:u16, offset_high:u32, reserved:u32 }
 impl IdtEntry {
-    const MISSING:Self=Self{offset_low:0,selector:0,ist:0,attributes:0,offset_middle:0,offset_high:0,reserved:0};
-    fn gate(address:u64,ist:u8,attributes:u8)->Self{Self{offset_low:address as u16,selector:gdt::code_selector(),ist:ist&7,attributes,offset_middle:(address>>16)as u16,offset_high:(address>>32)as u32,reserved:0}}
-    fn kernel(address:u64,ist:u8)->Self{Self::gate(address,ist,0x8e)}
-    fn user_trap(address:u64)->Self{Self::gate(address,0,0xee)}
+ const MISSING:Self=Self{offset_low:0,selector:0,ist:0,attributes:0,offset_middle:0,offset_high:0,reserved:0};
+ fn gate(address:u64,ist:u8,attributes:u8)->Self{Self{offset_low:address as u16,selector:gdt::code_selector(),ist:ist&7,attributes,offset_middle:(address>>16)as u16,offset_high:(address>>32)as u32,reserved:0}}
+ fn kernel(address:u64,ist:u8)->Self{Self::gate(address,ist,0x8e)}
+ fn user_trap(address:u64)->Self{Self::gate(address,0,0xee)}
 }
 #[repr(C,packed)]struct IdtPointer{limit:u16,base:u64}
 struct IdtStorage(UnsafeCell<[IdtEntry;256]>);unsafe impl Sync for IdtStorage{}
@@ -58,5 +58,10 @@ user_trap_80:
  mov rdi, rax
  and rsp, -16
  call rust_user_trap
- ud2
+ mov ax, 0x10
+ mov ds, ax
+ mov es, ax
+ mov ss, ax
+ mov rsp, [rip + ALOHA_USER_RETURN_RSP]
+ ret
 "#);
