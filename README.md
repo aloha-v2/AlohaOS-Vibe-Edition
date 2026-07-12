@@ -1,35 +1,23 @@
 # AlohaOS Vibe Edition
 
-Экспериментальная x86_64 ОС на Rust: собственный AlohaBoot UEFI bootloader и hybrid `no_std` kernel.
+Экспериментальная x86_64 ОС на Rust: собственный AlohaBoot UEFI bootloader и `no_std` kernel.
 
 ## Работает сейчас
 
 - UEFI ELF loader, framebuffer и UEFI memory map handoff.
-- GDT, TSS, IDT, ISR и kernel panic screen.
-- Physical frame allocator, 4-level paging и higher-half direct map.
-- Reclaiming linked-list heap, `Box`, `Vec`, `String` и `dealloc`.
+- GDT, TSS, IDT, ISR, отдельные IST stacks и kernel panic screen.
+- Physical frame allocator с возвратом одиночных frames, 4-level paging и higher-half direct map.
+- 1 MiB bump heap для ранних kernel objects, `Box`, `Vec` и `String`.
 - PIC 8259, PIT 100 Hz, uptime и PS/2 keyboard.
-- Task lifecycle: Ready, Running, Blocked, Sleeping и Dead; timer автоматически будит sleeping tasks.
-- Для каждой задачи выделен отдельный guarded kernel stack.
-- Dedicated 20 KiB scheduler/timer IST stack.
-- Assembly-only context-switch trampoline сохраняет persistent GPR/IRET frame, CR3, FS/GS base и FPU/SSE/AVX через XSAVE/XRSTOR.
-- Preemptive two-task round-robin доступен через runtime gate `sched on|off`.
+- Полный x86_64 task context: GPR/IRET frame, CR3, FS/GS и XSAVE/XRSTOR.
+- Task lifecycle: Ready, Running, Blocked, Sleeping и Dead.
+- Отдельные 16 KiB kernel stacks с unmapped guard pages.
+- Preemptive round-robin включён по умолчанию и прошёл часовой QEMU stress без Double Fault.
+- IRQ-safe spinlock, scheduler-aware mutex, semaphore и wait queue.
+- Allocation-free COM1 logger с уровнями DEBUG, INFO и ERROR.
 - Legacy VirtIO Block и read-only FAT32: `ls /`, `cat hello.txt`.
-- Shell: history, `help`, `clear`, `meminfo`, `uptime`, `tasks`, `sched on|off`, `ls`, `cat`, `reboot`.
-- Allocation-free COM1 kernel log с уровнями DEBUG, INFO и ERROR, включая panic output.
-- IRQ-safe spinlock; COM1 logger уже переведён на него.
-- GitHub Actions проверяет release build, boot/timer/FAT32 smoke и scheduler stress.
-
-## Прогресс по roadmap
-
-- Полный x86_64 context-switch механизм готов.
-- Hardware smoke на Windows/QEMU пройден: обе задачи дошли до 588 switches, worker heartbeat вырос до 588, shell и FAT32 остались рабочими.
-- Автоматический 60-секундный scheduler stress прошёл без Double Fault.
-- Полный часовой QEMU stress прошёл 3600 секунд без Double Fault, kernel panic и storage errors.
-- Изменения влиты в `main`; build, QEMU smoke и scheduler stress на `main` зелёные.
-- Следующий этап: включить round-robin по умолчанию, мигрировать heap/device shared state на IRQ-safe primitives и расширить QEMU tests.
-
-Подробный порядок работ и статусы: [TODO.md](TODO.md).
+- Shell: history, `help`, `clear`, `meminfo`, `uptime`, `tasks`, `sched`, `ls`, `cat`, `reboot`.
+- GitHub Actions: release build, QEMU boot/storage smoke и scheduler stress.
 
 ## Windows
 
@@ -37,8 +25,6 @@
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-git switch main
-git pull origin main
 .\scripts\run-qemu.ps1
 ```
 
@@ -46,24 +32,21 @@ git pull origin main
 
 ```text
 tasks
-sched on
-tasks
 uptime
 ls /
 cat hello.txt
 meminfo
 ```
 
-После `sched on` команда `tasks` должна показывать растущие context switches у обеих задач и ненулевой worker heartbeat. Runtime gate пока намеренно выключен после reboot; включение round-robin по умолчанию остаётся следующим отдельным шагом.
+`tasks` показывает lifecycle, число context switches и worker heartbeat. `sched on|off` оставлен как диагностический аварийный переключатель, обычная загрузка сразу включает preemption.
 
-## Дальше
+## Текущий этап: M0 Kernel Stable
 
-- Включить preemptive round-robin по умолчанию.
-- Мигрировать heap и device shared state на IRQ-safe primitives.
-- Добавить mutex, semaphore и wait queue.
-- Реализовать physical frame deallocation.
-- Расширить QEMU tests: exceptions, heap, disk и keyboard.
-- Затем Ring 3, user address spaces, syscalls и user-space shell.
+Основной scheduler готов. До закрытия M0 осталось убрать небезопасный shared state из framebuffer/VirtIO/descriptor tables, добавить panic backtrace и расширить QEMU smoke tests на exceptions, heap и keyboard.
+
+После M0: Ring 3, отдельные address spaces, минимальные syscalls и перенос shell в user space. Не начинаем desktop поверх нестабильного ядра, это путь в цирк с Double Fault.
+
+Подробный статус: [TODO.md](TODO.md).
 
 ## Лицензия
 

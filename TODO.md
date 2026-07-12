@@ -6,32 +6,26 @@
 
 ## 1. Стабильность ядра
 
-- [x] Реализовать полный x86_64 context switch: GPR/IRET, CR3, FS/GS base, FPU/SSE/AVX через XSAVE/XRSTOR.
+- [x] Переписать полный x86_64 context switch: GPR, RIP, RSP, RFLAGS, CR3, FS/GS base, FPU/SSE/AVX через XSAVE/XRSTOR.
 - [x] Реализовать lifecycle задач: Ready, Running, Blocked, Sleeping, Dead.
 - [x] Добавить отдельный kernel stack для каждой задачи и guard page от переполнения.
-- [x] Сделать стабильный preemptive round-robin scheduler и stress-test переключений: hardware smoke, 60s CI и 3600s QEMU stress пройдены без Double Fault.
-- [ ] Включить preemptive round-robin по умолчанию.
-- [ ] Добавить spinlock, mutex, semaphore, wait queue и IRQ-safe locking. IRQ-safe spinlock и миграция COM1 уже готовы.
-- [ ] Мигрировать heap/device shared state на IRQ-safe primitives.
-- [ ] Убрать глобальные `static mut` из горячих подсистем.
-- [ ] Реализовать нормальное освобождение физических фреймов.
+- [x] Сделать стабильный preemptive round-robin scheduler и stress-test переключений.
+- [x] Добавить spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
+- [ ] Убрать глобальные `static mut` из горячих подсистем. Physical allocator и FAT32 готовы; остались framebuffer, VirtIO и descriptor tables.
+- [x] Реализовать освобождение и повторное использование одиночных физических фреймов. Coalescing contiguous ranges отложен до process address spaces.
 - [x] Добавить kernel log, serial output в COM1 и уровни log severity.
 - [ ] Добавить symbol table/backtrace для panic screen.
-- [ ] Создать полный QEMU test suite: boot, exceptions, heap, scheduler, disk, keyboard. Build, boot/timer/FAT32 smoke и scheduler stress уже работают.
+- [ ] Создать QEMU smoke tests: boot, exceptions, heap, scheduler, disk, keyboard. Сейчас автоматизированы build, boot/storage smoke и scheduler stress.
 
-**Готово, когда:** несколько задач работают час без Double Fault, утечек и зависаний. Часовой scheduler stress пройден; проверки утечек и остальные тесты ещё впереди.
+**Готово, когда:** несколько задач работают час без Double Fault, утечек и зависаний.
 
-### Выполнено
+### Подтверждённый статус M0
 
-- COM1 logger работает без heap, пишет boot/panic с severity и защищён IRQ-safe spinlock.
-- Lifecycle хранится атомарно; поддержаны block, wake, timed sleep и exit.
-- PIT переводит Sleeping в Ready при достижении wake tick.
-- Для каждой задачи мапится отдельный guarded kernel stack.
-- Dedicated scheduler/timer IST stack проверен на Windows/QEMU.
-- Assembly-only trampoline сохраняет persistent GPR/IRET frame, CR3, FS/GS и XSAVE state.
-- Runtime gate `sched on|off` работает.
-- Hardware smoke: обе задачи по 588 switches, worker heartbeat 588, shell и FAT32 живы.
-- Автоматические 60s и 3600s scheduler stress-тесты прошли без Double Fault, panic и storage errors.
+- Extended context switch сохраняет persistent GPR/IRET frame, CR3, FS/GS и XSAVE state.
+- Round-robin включён по умолчанию; hardware smoke, 60-секундный CI stress и часовой QEMU stress прошли без Double Fault.
+- Task-context mutex/semaphore/wait queue паркуют задачи вместо busy loop; IRQ paths используют отдельный spinlock.
+- Physical frame allocator защищён IRQ-safe lock и повторно использует освобождённые 4 KiB frames.
+- Следующий шаг: убрать оставшийся mutable global state, затем panic backtrace и недостающие smoke tests.
 
 ## 2. ACPI, APIC и современное железо
 
@@ -170,7 +164,7 @@
 
 ## 12. Рекомендуемые milestone-релизы
 
-- [ ] **M0 Kernel Stable:** exceptions, memory, full scheduler, tests. Scheduler готов; остальные M0 проверки ещё впереди.
+- [ ] **M0 Kernel Stable:** exceptions, memory, full scheduler, tests.
 - [ ] **M1 Userland:** Ring 3, syscalls, ELF apps, user shell.
 - [ ] **M2 Storage:** VFS, writable FAT32, persistent settings.
 - [ ] **M3 Graphics:** mouse, VirtIO GPU, compositor, windows.
@@ -179,8 +173,8 @@
 
 ## Ближайшие задачи
 
-1. Включить preemptive round-robin по умолчанию.
-2. Мигрировать heap lock на общий IRQ-safe primitive.
-3. Добавить mutex, semaphore и wait queue.
-4. Реализовать physical frame deallocation.
-5. Расширить QEMU tests: exceptions, heap, disk и keyboard.
+1. Убрать оставшиеся `static mut` из framebuffer, VirtIO и descriptor tables.
+2. Добавить symbol table/backtrace для panic screen.
+3. Расширить QEMU smoke tests на exceptions, heap и keyboard.
+4. После закрытия M0 начать Ring 3, user address spaces и минимальные syscalls.
+5. Затем перенести shell в user space и строить VFS поверх VirtIO Block/FAT32.
