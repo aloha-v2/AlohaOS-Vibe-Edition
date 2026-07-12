@@ -5,14 +5,15 @@
 ## Готово
 
 - M0 Kernel Stable и полный QEMU regression suite.
-- Ring 3, per-process address spaces, real syscalls и ELF execution.
-- Bounded process table с monotonic PID allocation.
-- Parent/child links, exit status, wait/reap и orphan reparenting.
-- Registry metadata отделена от ownership Process/address-space objects, чтобы cleanup оставался детерминированным.
+- Ring 3, real syscalls, ELF loading/execution и process table.
+- Existing Process objects можно регистрировать с parent metadata.
+- `getpid`, `sleep`, `exit`, `wait` синхронизируют Process lifecycle с registry.
+- `wait` возвращает Busy для живого child, exit status после завершения и атомарно reaps запись.
+- Exit reparent-ит детей к PID 0.
 
 ## Текущий этап: M1 Userland
 
-Process registry и wait semantics готовы. Следующий пакет связывает таблицу с реальным spawn/exit path и изолирует user exceptions: faulted process завершается и reaps, kernel продолжает работу.
+Process lifecycle теперь проходит через syscall dispatcher и registry. Следующий пакет: blocking wait queue и scheduler-backed sleep deadline, затем user fault isolation.
 
 Подробный статус: [TODO.md](TODO.md).
 
