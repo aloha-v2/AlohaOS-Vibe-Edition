@@ -1,29 +1,27 @@
-//! First controlled Ring 3 round-trip for AlohaOS.
-//!
-//! A tiny user image runs under its process CR3 and returns only through the
-//! DPL3 software trap at vector 0x80. Bootstrap stack bookkeeping stays wholly
-//! in assembly; Rust only records the marker and updates process state.
+//! Controlled Ring 3 execution for bootstrap and real-syscall smoke programs.
 
 use core::arch::global_asm;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{gdt, process::Process};
+use crate::{gdt, process::Process, syscall_arch};
 
 const NO_MARKER: u64 = u64::MAX;
 static LAST_MARKER: AtomicU64 = AtomicU64::new(NO_MARKER);
 
 unsafe extern "C" {
     fn aloha_enter_user(rip: u64, rsp: u64, code_selector: u64, data_selector: u64);
+    static ALOHA_USER_RETURN_RSP: u64;
 }
 
 pub fn run(process: &mut Process) -> u64 {
     LAST_MARKER.store(NO_MARKER, Ordering::Release);
     process.mark_running();
-
-    // Keep the immutable address-space borrow in its own scope. The guard must
-    // restore kernel CR3 and drop before Process state is mutated below.
     {
         let address_space_guard = process.address_space.activate();
+        let kernel_return_rsp = unsafe { core::ptr::read_volatile(&raw const ALOHA_USER_RETURN_RSP) };
+        // The assembly entry overwrites this slot just before IRET. Install it
+        // again from the live stack inside aloha_enter_user via shared symbol.
+        syscall_arch::install_process(process, kernel_return_rsp);
         unsafe {
             aloha_enter_user(
                 process.entry,
@@ -34,11 +32,10 @@ pub fn run(process: &mut Process) -> u64 {
         }
         drop(address_space_guard);
     }
-
     let marker = LAST_MARKER.load(Ordering::Acquire);
-    if marker == NO_MARKER {
+    if marker == NO_MARKER && process.state == crate::process::ProcessState::Running {
         process.fault();
-    } else {
+    } else if marker != NO_MARKER {
         process.exit(0);
     }
     marker
@@ -53,14 +50,14 @@ global_asm!(r#"
 .section .bss
 .align 8
 .global ALOHA_USER_RETURN_RSP
-ALOHA_USER_RETURN_RSP:
-    .zero 8
+ALOHA_USER_RETURN_RSP: .zero 8
 
 .section .text
 .global aloha_enter_user
 .type aloha_enter_user,@function
 aloha_enter_user:
     mov [rip + ALOHA_USER_RETURN_RSP], rsp
+    mov [rip + ALOHA_SYSCALL_KERNEL_RETURN_RSP], rsp
     mov ax, cx
     mov ds, ax
     mov es, ax
