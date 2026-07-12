@@ -5,25 +5,18 @@
 ## Готово
 
 - M0 Kernel Stable: scheduler, memory, synchronization, diagnostics и QEMU regression suite.
-- Ring 3 descriptors, TSS `RSP0`, per-process PML4 и USER/NX W^X mappings.
-- Process lifecycle, safe CR3 guard и validated multi-page user copies.
-- Реальный `iretq` Ring 3 round-trip через controlled `int 0x80` trap.
-- Versioned syscall ABI и единый safe dispatcher для `write`, `exit`, `sleep`.
-- Pointer validation и bounded copy выполняются до обработки user buffers.
-- UEFI loader, framebuffer, keyboard, VirtIO Block, FAT32, COM1 logger и shell.
+- Ring 3 descriptors, TSS `RSP0`, per-process PML4, USER/NX W^X mappings и validated user copies.
+- Реальный `iretq` Ring 3 round-trip и controlled DPL3 trap.
+- Versioned syscall ABI и dispatcher для `write`, `exit`, `sleep`.
+- Каждый Process теперь владеет отдельным 32 KiB kernel entry stack.
+- Syscall return frames классифицируются: safe `sysret`, audited `iret` fallback или reject.
+- CPUID capability check и RFLAGS sanitization готовы до включения MSR entry.
 
 ## Текущий этап: M1 Userland
 
-Теперь готова независимая syscall semantic layer: numbers, errno encoding, dispatcher и первые три операции. Следующий пакет подключит её к production `SYSCALL/SYSRET` entry через MSR, per-process kernel entry stack и hardened return checks.
+Сначала закрепили опасные инварианты entry path: stack ownership, canonical RIP/RSP, forbidden RFLAGS и безопасный выбор return instruction. Следующий PR уже может включать EFER/STAR/LSTAR/FMASK и assembly entry, не смешивая это с непроверенной логикой.
 
 Подробный статус: [TODO.md](TODO.md).
-
-## Windows
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\run-qemu.ps1
-```
 
 ## Лицензия
 

@@ -1,29 +1,27 @@
 # AlohaOS Roadmap
 
-Цель: стабильная x86_64 ОС с изолированным user space, VFS, IPC, networking и desktop applications.
-
 ## M0 Kernel Stable
 
-- [x] Context switching, scheduler, synchronization, memory reclamation, panic diagnostics и smoke tests.
+- [x] Context switching, scheduler, synchronization, memory reclamation, diagnostics и QEMU tests.
 
 ## M1 Userland
 
 ### Process memory и Ring 3
 
 - [x] Ring 3 descriptors, TSS `RSP0`, per-process PML4 и USER/NX W^X mappings.
-- [x] CR3 guard, Process lifecycle и validated multi-page user copies.
-- [x] Bootstrap image, guarded user stack, `iretq`, DPL3 trap и Ring 3 QEMU smoke.
+- [x] CR3 guard, Process lifecycle, validated user copies и Ring 3 round-trip.
 
-### Syscall ABI
+### Syscall ABI и entry
 
-- [x] Versioned syscall numbers, negative errno encoding и единый Rust dispatcher.
-- [x] `write`, `exit`, `sleep` semantics с pointer/length validation и bounded copies.
-- [x] Dispatcher smoke tests: success, oversized write, sleep lifecycle и exit code.
+- [x] Versioned numbers, errno и dispatcher для `write/exit/sleep`.
+- [x] Per-process 32 KiB kernel entry stack с ownership cleanup.
+- [x] Canonical user RIP/RSP validation.
+- [x] RFLAGS sanitization и классификация `sysret` / `iret` / reject.
+- [x] CPUID проверка поддержки SYSCALL/SYSRET.
 - [ ] Настроить EFER.SCE, STAR, LSTAR и FMASK.
-- [ ] Per-process kernel entry stack вместо bootstrap global return slot.
 - [ ] Assembly entry сохраняет user RSP/RCX/R11 и callee-saved registers.
-- [ ] Canonical RIP/RSP checks и fallback на `iretq` вместо опасного `sysretq`.
-- [ ] Подключить dispatcher к реальному `syscall` instruction и добавить QEMU syscall smoke.
+- [ ] Переключать на kernel entry stack до вызова Rust dispatcher.
+- [ ] Реальный QEMU syscall smoke для `write/exit/sleep`.
 - [ ] Затем `read/open/close/stat/mmap/spawn/wait` и handles.
 
 ### ELF, runtime и isolation
@@ -31,30 +29,21 @@
 - [ ] ELF64 validation, PT_LOAD W^X mappings, BSS zeroing и overlap rejection.
 - [ ] Process table, parent/child, waiters и cleanup.
 - [ ] User faults завершают процесс, не kernel.
-- [ ] Negative CI: bad pointer, NX execution, write-to-code, stack overflow, malformed ELF.
 - [ ] Rust user runtime, syscall wrappers, app Cargo build и user-space shell.
 
 ## M2 IPC, VM и storage
 
-- [ ] Channels/message queues, pipes, shared memory + `MAP_SHARED`, затем Unix sockets и signals.
-- [ ] Slab allocator, VM areas, mmap/mprotect, demand paging, file mappings и OOM policy.
-- [ ] VFS, writable FAT32, page cache, `/tmp`, permissions/capabilities и persistent settings.
+- [ ] Channels, pipes, shared memory/MAP_SHARED, Unix sockets и signals.
+- [ ] Slab, VM areas, demand paging, file mappings и OOM policy.
+- [ ] VFS, writable FAT32, page cache, permissions/capabilities и settings.
 
-## M3 Hardware, network и security
+## M3-M5
 
-- [ ] ACPI/APIC/HPET/SMP/PCIe, power management и device manager.
-- [ ] VirtIO-net, ARP/IPv4/ICMP, UDP/TCP, sockets, DHCP, DNS и HTTP.
-- [ ] SMEP/SMAP, canaries, ASLR/KASLR, Secure Boot, watchdog и recovery.
-
-## M4-M5 Graphics, desktop и distribution
-
-- [ ] VirtIO GPU, input events, compositor, toolkit, desktop shell, apps и audio.
-- [ ] libc/runtime/toolchain, package manager, signed repositories и updates.
-- [ ] GDB stub, tracing, core dumps, profiler, fuzzing, regression CI и docs.
+- [ ] ACPI/APIC/SMP, networking/security, graphics/desktop, packages/tooling/docs.
 
 ## Следующий пакет
 
-1. SYSCALL MSRs + hardened assembly entry/return + per-process kernel stack.
-2. Реальный syscall QEMU smoke для `write/exit/sleep`.
+1. EFER/STAR/LSTAR/FMASK + assembly entry on per-process stack.
+2. Подключить dispatcher и QEMU smoke `write/exit/sleep`.
 3. ELF loader + process table + fault isolation.
-4. Channels + shared memory как первый IPC слой.
+4. Channels + shared memory.
