@@ -8,31 +8,25 @@
 
 ## M1 Userland
 
-### Process memory
+### Process memory и Ring 3
 
-- [x] Ring 3 descriptors и TSS `RSP0`.
-- [x] Per-process PML4, USER/NX W^X mappings и owned-frame cleanup.
-- [x] Interrupt-safe CR3 guard, Process lifecycle и validated multi-page user copies.
+- [x] Ring 3 descriptors, TSS `RSP0`, per-process PML4 и USER/NX W^X mappings.
+- [x] CR3 guard, Process lifecycle и validated multi-page user copies.
+- [x] Bootstrap image, guarded user stack, `iretq`, DPL3 trap и Ring 3 QEMU smoke.
 
-### Первый Ring 3 round-trip
+### Syscall ABI
 
-- [x] Bootstrap user image в RX mapping.
-- [x] Отдельный 4-page NX user stack; соседние страницы остаются guard gaps.
-- [x] `iretq` trampoline с RPL3 CS/SS, user RIP/RSP и IF.
-- [x] DPL3 software trap `int 0x80` с hardware switch на TSS `RSP0`.
-- [x] Контролируемый возврат в suspended kernel frame и restore kernel CR3.
-- [x] Отдельный QEMU `ring3-smoke` CI job.
-
-### Production syscall ABI
-
+- [x] Versioned syscall numbers, negative errno encoding и единый Rust dispatcher.
+- [x] `write`, `exit`, `sleep` semantics с pointer/length validation и bounded copies.
+- [x] Dispatcher smoke tests: success, oversized write, sleep lifecycle и exit code.
 - [ ] Настроить EFER.SCE, STAR, LSTAR и FMASK.
 - [ ] Per-process kernel entry stack вместо bootstrap global return slot.
 - [ ] Assembly entry сохраняет user RSP/RCX/R11 и callee-saved registers.
-- [ ] Canonical RIP/RSP checks; безопасный fallback на `iretq` вместо опасного `sysretq`.
-- [ ] Syscalls `write`, `exit`, `sleep` с errno и ABI version.
+- [ ] Canonical RIP/RSP checks и fallback на `iretq` вместо опасного `sysretq`.
+- [ ] Подключить dispatcher к реальному `syscall` instruction и добавить QEMU syscall smoke.
 - [ ] Затем `read/open/close/stat/mmap/spawn/wait` и handles.
 
-### ELF и isolation
+### ELF, runtime и isolation
 
 - [ ] ELF64 validation, PT_LOAD W^X mappings, BSS zeroing и overlap rejection.
 - [ ] Process table, parent/child, waiters и cleanup.
@@ -60,7 +54,7 @@
 
 ## Следующий пакет
 
-1. Syscall MSRs + hardened assembly entry/return.
-2. `write/exit/sleep` и syscall smoke tests.
+1. SYSCALL MSRs + hardened assembly entry/return + per-process kernel stack.
+2. Реальный syscall QEMU smoke для `write/exit/sleep`.
 3. ELF loader + process table + fault isolation.
 4. Channels + shared memory как первый IPC слой.
