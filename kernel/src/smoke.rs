@@ -74,18 +74,22 @@ fn process_foundation_smoke() {
         process.address_space.copy_to_user(process.entry, b"X"),
         Err(address_space::UserAccessError::NotWritable)
     );
+    // Bit 47 is set without upper sign-extension, so this is genuinely
+    // noncanonical in 48-bit x86_64 mode. u64::MAX is canonical high-half.
     assert_eq!(
-        process.address_space.validate_user_range(u64::MAX - 2, 8, false),
+        process
+            .address_space
+            .validate_user_range(0x0000_8000_0000_0000, 8, false),
         Err(address_space::UserAccessError::NonCanonical)
     );
 
-    let original_root;
+    let active_root;
     {
         let guard = process.address_space.activate();
         assert_eq!(guard.active_root(), process.address_space.root_frame());
-        original_root = guard.active_root();
+        active_root = guard.active_root();
     }
-    assert_ne!(original_root, 0);
+    assert_ne!(active_root, 0);
     process.mark_running();
     process.exit(42);
     assert_eq!(process.state, process::ProcessState::Exited);
