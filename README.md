@@ -15,11 +15,12 @@
 - Preemptive round-robin включён по умолчанию и прошёл часовой QEMU stress без Double Fault.
 - IRQ-safe spinlock, scheduler-aware mutex, semaphore и wait queue.
 - Allocation-free COM1 logger с уровнями DEBUG, INFO и ERROR.
+- Bounded panic backtrace с офлайн-символизацией через `scripts/symbolize-backtrace.py`.
 - Горячие подсистемы и descriptor tables больше не используют `static mut`.
 - Legacy VirtIO Block сериализует DMA queue и request state через scheduler-aware mutex.
 - Read-only FAT32: `ls /`, `cat hello.txt`; mount state защищён IRQ-safe lock.
 - Shell: history, `help`, `clear`, `meminfo`, `uptime`, `tasks`, `sched`, `ls`, `cat`, `reboot`.
-- GitHub Actions: release build, QEMU boot/storage smoke и scheduler stress.
+- GitHub Actions: release build, boot/storage, heap/memory/keyboard, exception и scheduler smoke tests.
 
 ## Windows
 
@@ -42,11 +43,11 @@ meminfo
 
 `tasks` показывает lifecycle, число context switches и worker heartbeat. `sched on|off` оставлен как диагностический аварийный переключатель, обычная загрузка сразу включает preemption.
 
-## Текущий этап: M0 Kernel Stable
+## Текущий этап: M1 Userland
 
-Scheduler, memory reclamation и shared-state cleanup готовы. До закрытия M0 осталось добавить panic backtrace и расширить QEMU smoke tests на exceptions, heap и keyboard.
+**M0 Kernel Stable завершён.** Context switching, task lifecycle, guarded stacks, synchronization, frame reclamation, panic backtrace и пять CI jobs подтверждены. Scheduler прошёл часовой QEMU stress без Double Fault.
 
-После M0: Ring 3, отдельные address spaces, минимальные syscalls и перенос shell в user space. Не начинаем desktop поверх нестабильного ядра, это путь в цирк с Double Fault.
+Следующий шаг: Ring 3 descriptors и TSS `RSP0`, отдельные user address spaces, USER/NX mappings и минимальный безопасный syscall path. Desktop пока не трогаем, ядро сначала должно научиться изолировать приложения.
 
 Подробный статус: [TODO.md](TODO.md).
 
