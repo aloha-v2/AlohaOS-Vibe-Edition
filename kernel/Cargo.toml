@@ -6,6 +6,8 @@ edition = "2021"
 [features]
 default = []
 scheduler-stress = []
+m0-smoke = []
+exception-smoke = []
 
 [[bin]]
 name = "kernel"

@@ -22,6 +22,7 @@ mod pic;
 mod scheduler;
 mod serial;
 mod shell;
+mod smoke;
 mod sync;
 mod task_context;
 mod task_stacks;
@@ -70,6 +71,10 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
     drop(values);
     drop(boxed);
     serial::info(format_args!("kernel heap ready"));
+
+    smoke::run_nonfatal();
+    #[cfg(feature = "exception-smoke")]
+    smoke::trigger_exception();
 
     if !task_stacks::init() {
         fatal("TASK STACK MAPPING FAILED");
