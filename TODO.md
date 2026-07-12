@@ -11,7 +11,7 @@
 - [x] Добавить отдельный kernel stack для каждой задачи и guard page от переполнения.
 - [x] Сделать стабильный preemptive round-robin scheduler и stress-test переключений.
 - [x] Добавить spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
-- [ ] Убрать глобальные `static mut` из горячих подсистем. Physical allocator и FAT32 готовы; остались framebuffer, VirtIO и descriptor tables.
+- [ ] Убрать глобальные `static mut` из горячих подсистем. Physical allocator, FAT32, framebuffer и VirtIO готовы; остались GDT/IDT descriptor tables.
 - [x] Реализовать освобождение и повторное использование одиночных физических фреймов. Coalescing contiguous ranges отложен до process address spaces.
 - [x] Добавить kernel log, serial output в COM1 и уровни log severity.
 - [ ] Добавить symbol table/backtrace для panic screen.
@@ -25,7 +25,9 @@
 - Round-robin включён по умолчанию; hardware smoke, 60-секундный CI stress и часовой QEMU stress прошли без Double Fault.
 - Task-context mutex/semaphore/wait queue паркуют задачи вместо busy loop; IRQ paths используют отдельный spinlock.
 - Physical frame allocator защищён IRQ-safe lock и повторно использует освобождённые 4 KiB frames.
-- Следующий шаг: убрать оставшийся mutable global state, затем panic backtrace и недостающие smoke tests.
+- FAT32 mount state и framebuffer console больше не используют mutable globals.
+- VirtIO Block сериализует DMA queue, descriptors и request buffers через scheduler-aware mutex.
+- Следующий шаг: убрать mutable descriptor tables, затем panic backtrace и недостающие smoke tests.
 
 ## 2. ACPI, APIC и современное железо
 
@@ -173,7 +175,7 @@
 
 ## Ближайшие задачи
 
-1. Убрать оставшиеся `static mut` из framebuffer, VirtIO и descriptor tables.
+1. Убрать оставшиеся `static mut` из GDT/IDT descriptor tables.
 2. Добавить symbol table/backtrace для panic screen.
 3. Расширить QEMU smoke tests на exceptions, heap и keyboard.
 4. После закрытия M0 начать Ring 3, user address spaces и минимальные syscalls.
