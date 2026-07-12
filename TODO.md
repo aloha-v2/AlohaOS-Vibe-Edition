@@ -6,32 +6,32 @@
 
 ## M1 Userland
 
-### Ring 3 и process memory
+### Ring 3 и syscalls
 
-- [x] Ring 3 descriptors, TSS `RSP0`, per-process PML4, USER/NX W^X и safe user copies.
-- [x] Process lifecycle, CR3 guard, owned kernel entry stacks и Ring 3 `iretq` round-trip.
+- [x] Ring 3, per-process PML4, USER/NX W^X, CR3 guard и safe user copies.
+- [x] Process-owned kernel stacks, LSTAR entry, dispatcher и validated SYSRET.
+- [x] Real user `write` и `exit` syscall QEMU smoke.
+- [ ] IRET fallback и scheduler-backed `sleep` resume.
+- [ ] `read/open/close/stat/mmap/spawn/wait` и handle table.
 
-### Production syscall path
+### ELF loader
 
-- [x] Versioned ABI, errno и dispatcher для `write/exit/sleep`.
-- [x] EFER.SCE, STAR, LSTAR, FMASK и readback validation.
-- [x] Assembly LSTAR entry сохраняет syscall number, 6 args, user RIP/RFLAGS/RSP.
-- [x] Переключение с user RSP на active process kernel stack до Rust.
-- [x] Dispatcher bridge и validated SYSRET fast path.
-- [x] `exit` возвращает управление suspended kernel frame и сохраняет exit code.
-- [x] QEMU real-syscall smoke: user `write`, SYSRET continuation, user `exit`.
-- [ ] Реализовать IRET fallback для допустимых, но небезопасных для SYSRET frames.
-- [ ] Подключить `sleep` к scheduler deadline и возобновлению процесса.
-- [ ] Добавить `read/open/close/stat/mmap/spawn/wait` и handle table.
+- [x] ELF64 magic/class/endian/type/machine validation.
+- [x] ELF/program-header bounds и integer-overflow checks.
+- [x] Bounded PT_LOAD plan, user-region enforcement и entry-in-executable validation.
+- [x] W^X rejection, segment overlap rejection и BSS size planning.
+- [x] Valid/malformed/W+X smoke tests.
+- [ ] Мапить все страницы PT_LOAD с итоговыми permissions.
+- [ ] Копировать file bytes через physical ownership и zero-fill BSS.
+- [ ] Поддержать page-aligned overlap внутри одного compatible segment layout.
+- [ ] Запустить Process с ELF entry и guarded stack.
 
-### ELF, process table и isolation
+### Process table и isolation
 
-- [ ] ELF64 validation: magic/class/machine/type/header bounds.
-- [ ] PT_LOAD mappings, W^X, BSS zeroing и overlap rejection.
-- [ ] Process table: PID allocation, parent/child, waiters и cleanup.
+- [ ] PID allocator, parent/child, waiters, handles и cleanup.
 - [ ] User page fault/invalid opcode завершают процесс, не kernel.
-- [ ] Negative CI: bad pointer, NX execution, write-to-code, stack overflow, malformed ELF.
-- [ ] Rust user runtime, wrappers, app Cargo build и user-space shell.
+- [ ] Negative CI: bad pointer, NX execute, write-to-code, stack overflow, malformed ELF.
+- [ ] Rust user runtime, wrappers, app build и user-space shell.
 
 ## M2 IPC, VM и storage
 
@@ -45,7 +45,7 @@
 
 ## Следующий пакет
 
-1. IRET fallback + real scheduler-backed sleep.
-2. ELF64 parser/loader + malformed-image tests.
-3. Process table, wait/cleanup и user-fault isolation.
+1. PT_LOAD page mapping + file copy + BSS zeroing.
+2. ELF entry execution smoke.
+3. Process table + wait/cleanup + fault isolation.
 4. Channels + shared memory.

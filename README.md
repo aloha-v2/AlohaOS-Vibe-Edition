@@ -4,16 +4,16 @@
 
 ## Готово
 
-- M0 Kernel Stable: scheduler, memory, synchronization, diagnostics и QEMU regression suite.
-- Ring 3, per-process PML4, W^X, safe user copies и process-owned kernel entry stacks.
-- Versioned syscall ABI и dispatcher для `write`, `exit`, `sleep`.
-- EFER/STAR/LSTAR/FMASK, full assembly entry, switch с user RSP на process kernel stack и register frame.
-- Реальный user `syscall` вызывает `write`, возвращается через validated `sysretq`, затем `exit` возвращает управление kernel.
-- Отдельный QEMU syscall smoke проверяет LSTAR, dispatcher, SYSRET и process exit end-to-end.
+- M0 Kernel Stable и полный QEMU regression suite.
+- Ring 3, per-process address spaces, W^X, safe user copies и process-owned kernel stacks.
+- Реальный SYSCALL/SYSRET путь для user `write` и `exit`.
+- Allocation-free ELF64 validator строит bounded load plan.
+- Проверяются ELF magic/class/endian/type/machine, header bounds, PT_LOAD ranges и entry point.
+- W^X, user-region bounds, segment overlap и BSS (`memsz - filesz`) входят в validation policy.
 
 ## Текущий этап: M1 Userland
 
-Первый настоящий syscall round-trip готов. Следующий пакет: IRET fallback для сложных return frames, реальный `sleep`, process table, ELF64 loader и fault isolation.
+ELF parsing и безопасный load plan готовы. Следующий пакет реально мапит PT_LOAD pages в Process, копирует file bytes, обнуляет BSS и запускает ELF entry; затем process table и fault isolation.
 
 Подробный статус: [TODO.md](TODO.md).
 
