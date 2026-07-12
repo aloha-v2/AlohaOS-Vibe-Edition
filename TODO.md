@@ -6,28 +6,27 @@
 ## M1 Userland
 
 ### Выполнено
-- [x] Ring 3, per-process memory, W^X, safe copies и kernel entry stacks.
-- [x] Real syscalls, ELF loading/execution и process registry.
-- [x] PID/parent/child, exit status, wait/reap и orphan reparenting.
-- [x] Sleep deadlines и time-driven Ready transition.
-- [x] Blocking wait registration и wake parent on child exit/fault.
-- [x] One-shot wake events и smoke coverage.
+- [x] Ring 3, per-process memory, real syscalls и ELF execution.
+- [x] Process registry, PID/parent/child, wait/reap и orphan handling.
+- [x] Sleep deadlines и blocking wait wake events.
+- [x] PIT вызывает process deadline advancement.
+- [x] Runner reconciliation после sleep/wait wake.
+- [x] Blocking wait completion возвращает child status и reaps запись.
 
 ### Следующий слой
-- [ ] Вызывать `process_table::advance_time` из timer tick.
-- [ ] Process runner должен resume Ready process после sleep/wait wake.
-- [ ] Blocking `wait` syscall должен возвращать status после resumption, не Busy.
-- [ ] IRET fallback для non-SYSRET-safe return frames.
+- [ ] Syscall `sleep` должен suspend текущий user frame и resume с того же RIP.
+- [ ] Syscall `wait` должен resume и вернуть status в RAX автоматически.
 - [ ] User page fault/invalid opcode завершают process, не kernel.
-- [ ] Spawn ownership: ELF + Process + registry slot + rollback.
+- [ ] Negative QEMU: NX execute, write-to-code, stack guard, bad pointer.
+- [ ] Spawn ownership: ELF + Process + registry + rollback.
 - [ ] Handle table и `read/open/close/stat/mmap`.
 - [ ] Rust runtime и user-space shell.
 
 ## M2+
-- [ ] IPC channels/shared memory, VM/VFS, hardware/network/security, graphics/desktop, packages/tooling.
+- [ ] IPC/shared memory, VM/VFS, networking/security, graphics/desktop, packages/tooling.
 
 ## Следующий пакет
-1. Timer integration + process runner resume.
-2. User fault isolation + negative QEMU tests.
+1. User fault isolation + negative QEMU tests.
+2. Suspended syscall frame resume для sleep/wait.
 3. Spawn ownership + handles.
 4. Channels + shared memory.
