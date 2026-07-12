@@ -11,9 +11,9 @@ pub fn run_nonfatal() {
     frame_reclamation_smoke();
     keyboard_smoke();
     user_descriptor_smoke();
-    serial::info(format_args!(
-        "m0-smoke: heap keyboard memory descriptors passed"
-    ));
+    // Keep the established M0 marker stable: CI and external smoke runners use
+    // it as a compatibility contract. M1 checks emit their own marker below.
+    serial::info(format_args!("m0-smoke: heap keyboard memory passed"));
 }
 
 #[cfg(not(feature = "m0-smoke"))]
