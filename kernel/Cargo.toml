@@ -10,6 +10,7 @@ m0-smoke = []
 exception-smoke = []
 ring3-smoke = []
 syscall-smoke = []
+elf-smoke = []
 
 [[bin]]
 name = "kernel"

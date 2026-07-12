@@ -1,0 +1,38 @@
+name: ELF execution smoke
+
+on:
+  push:
+    branches: [main, "brain/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  elf-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build ELF execution kernel
+        run: make esp PROFILE=release KERNEL_FEATURES=elf-smoke
+      - name: Verify loaded ELF enters Ring 3 and exits by syscall
+        shell: bash
+        run: |
+          OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
+          set +e
+          timeout 10s qemu-system-x86_64 -machine q35 -cpu max -m 256M \
+            -drive "if=pflash,format=raw,readonly=on,file=$OVMF" \
+            -drive "format=raw,file=fat:rw:esp" \
+            -display none -monitor none -serial file:elf.log -net none -no-reboot
+          status=$?
+          set -e
+          cat elf.log
+          test "$status" -eq 124
+          grep -q "elf-smoke: entering loaded ELF" elf.log
+          grep -q "elf-smoke: loaded ELF syscall exit passed" elf.log
+          ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' elf.log
