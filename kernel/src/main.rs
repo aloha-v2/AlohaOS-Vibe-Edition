@@ -20,6 +20,7 @@ mod keyboard;
 mod memory;
 mod paging;
 mod pic;
+mod process;
 mod scheduler;
 mod serial;
 mod shell;
@@ -35,65 +36,34 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
     unsafe { core::arch::asm!("cli", options(nomem, nostack)) };
     unsafe { serial::init() };
     serial::info(format_args!("AlohaOS kernel entry"));
-
     let info = unsafe { &*boot_info };
     framebuffer::init(info.framebuffer);
     framebuffer::clear(0x0f, 0x17, 0x2a);
-    serial::debug(format_args!(
-        "framebuffer ready: {}x{}",
-        info.framebuffer.width, info.framebuffer.height
-    ));
-
     gdt::init();
     interrupts::init();
-    serial::debug(format_args!("GDT, TSS and IDT ready"));
-
     unsafe { memory::init(info.memory_map) };
-    let test_frame = memory::allocate_frame()
-        .unwrap_or_else(|| fatal("NO USABLE PHYSICAL MEMORY"));
+    let test_frame = memory::allocate_frame().unwrap_or_else(|| fatal("NO USABLE PHYSICAL MEMORY"));
     let paging = match paging::init(info.memory_map) {
         Ok(value) => value,
         Err(paging::PagingError::OutOfFrames) => fatal("PAGE TABLE ALLOCATION FAILED"),
-        Err(paging::PagingError::PhysicalAddressTooLarge) => {
-            fatal("PHYSICAL MEMORY EXCEEDS DIRECT MAP")
-        }
+        Err(paging::PagingError::PhysicalAddressTooLarge) => fatal("PHYSICAL MEMORY EXCEEDS DIRECT MAP"),
     };
-    if !paging::verify_direct_map(test_frame) {
-        fatal("HIGHER HALF DIRECT MAP TEST FAILED");
-    }
-    serial::info(format_args!("physical memory and paging ready"));
-
+    if !paging::verify_direct_map(test_frame) { fatal("HIGHER HALF DIRECT MAP TEST FAILED"); }
     heap::init().unwrap_or_else(|| fatal("KERNEL HEAP ALLOCATION FAILED"));
     let boxed = Box::new(1u64);
     let values = Vec::from([1u64, 2, 3]);
     let title = String::from("ALLOC");
     core::hint::black_box((&boxed, &values, &title, paging.pml4_physical));
-    drop(title);
-    drop(values);
-    drop(boxed);
-    serial::info(format_args!("kernel heap ready"));
-
+    drop((title, values, boxed));
     smoke::run_nonfatal();
     #[cfg(feature = "exception-smoke")]
     smoke::trigger_exception();
-
-    if !task_stacks::init() {
-        fatal("TASK STACK MAPPING FAILED");
-    }
-    serial::info(format_args!("worker kernel stack and guard page ready"));
-
+    if !task_stacks::init() { fatal("TASK STACK MAPPING FAILED"); }
     let block_ready = virtio_blk::init();
     let fat_ready = block_ready && fat32::init();
-    serial::info(format_args!(
-        "storage: virtio_blk={}, fat32={}",
-        block_ready, fat_ready
-    ));
-
+    serial::info(format_args!("storage: virtio_blk={}, fat32={}", block_ready, fat_ready));
     scheduler::init();
-    unsafe {
-        pic::init_timer_and_keyboard();
-        timer::init();
-    }
+    unsafe { pic::init_timer_and_keyboard(); timer::init(); }
     interrupts::enable();
     serial::info(format_args!("interrupts enabled, starting shell"));
     shell::run()
@@ -107,11 +77,7 @@ fn fatal(message: &str) -> ! {
     halt()
 }
 
-pub fn halt() -> ! {
-    loop {
-        unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
-    }
-}
+pub fn halt() -> ! { loop { unsafe { core::arch::asm!("hlt", options(nomem, nostack)) }; } }
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
