@@ -11,6 +11,8 @@ exception-smoke = []
 ring3-smoke = []
 syscall-smoke = []
 elf-smoke = []
+user-ud-smoke = []
+user-nx-smoke = []
 
 [[bin]]
 name = "kernel"

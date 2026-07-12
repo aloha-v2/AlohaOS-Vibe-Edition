@@ -7,17 +7,18 @@
 
 ### Выполнено
 - [x] Ring 3, per-process memory, real syscalls и ELF execution.
-- [x] Process registry, PID/parent/child, wait/reap и orphan handling.
-- [x] Sleep deadlines и blocking wait wake events.
-- [x] PIT вызывает process deadline advancement.
-- [x] Runner reconciliation после sleep/wait wake.
-- [x] Blocking wait completion возвращает child status и reaps запись.
+- [x] Process registry, wait/reap, sleep deadlines и PIT wake/resume.
+- [x] Exception CPL detection для #UD и #PF.
+- [x] User invalid opcode завершает только Process.
+- [x] User NX instruction fetch/page fault завершает только Process.
+- [x] Fault status/exit code публикуются в registry, runner продолжает kernel.
+- [x] QEMU negative tests для user #UD и NX fault.
 
 ### Следующий слой
-- [ ] Syscall `sleep` должен suspend текущий user frame и resume с того же RIP.
-- [ ] Syscall `wait` должен resume и вернуть status в RAX автоматически.
-- [ ] User page fault/invalid opcode завершают process, не kernel.
-- [ ] Negative QEMU: NX execute, write-to-code, stack guard, bad pointer.
+- [ ] Write-to-code user fault test.
+- [ ] User stack guard overflow test.
+- [ ] Bad syscall pointer end-to-end negative test.
+- [ ] Suspended syscall frame resume для sleep/wait.
 - [ ] Spawn ownership: ELF + Process + registry + rollback.
 - [ ] Handle table и `read/open/close/stat/mmap`.
 - [ ] Rust runtime и user-space shell.
@@ -26,7 +27,7 @@
 - [ ] IPC/shared memory, VM/VFS, networking/security, graphics/desktop, packages/tooling.
 
 ## Следующий пакет
-1. User fault isolation + negative QEMU tests.
-2. Suspended syscall frame resume для sleep/wait.
+1. Negative protection tests: W^X write, stack guard, bad pointer.
+2. Suspended syscall resume для sleep/wait.
 3. Spawn ownership + handles.
 4. Channels + shared memory.
