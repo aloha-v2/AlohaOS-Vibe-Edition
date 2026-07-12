@@ -6,31 +6,28 @@
 
 ## M1 Userland
 
-### Ring 3 и syscalls
+### Ring 3, syscall и ELF
 
-- [x] Ring 3, per-process PML4, USER/NX W^X, CR3 guard и safe user copies.
+- [x] Ring 3, per-process PML4, W^X, CR3 guard и safe user copies.
 - [x] Process-owned kernel stacks, LSTAR entry, dispatcher и validated SYSRET.
 - [x] Real user `write` и `exit` syscall QEMU smoke.
+- [x] ELF64 validation, PT_LOAD mapping, file copy и BSS zeroing.
+- [x] Загруженный ELF выполняется с `e_entry` и завершает процесс syscall `exit`.
+- [x] Отдельный ELF execution QEMU CI job.
 - [ ] IRET fallback и scheduler-backed `sleep` resume.
 - [ ] `read/open/close/stat/mmap/spawn/wait` и handle table.
 
-### ELF loader
-
-- [x] ELF64/header/program-header validation и overflow checks.
-- [x] PT_LOAD load plan, user bounds, W^X, overlap и executable entry checks.
-- [x] Реальное page mapping с финальными writable/executable permissions.
-- [x] File bytes copy через physical page ownership.
-- [x] Явное zero-fill BSS через несколько страниц.
-- [x] Loader smoke проверяет загруженные bytes и BSS tail.
-- [ ] Запустить Process с ELF entry end-to-end и syscall exit.
-- [ ] Поддержать несколько compatible PT_LOAD на общей boundary page.
-- [ ] Rust user runtime, syscall wrappers и app Cargo build.
-
 ### Process table и isolation
 
-- [ ] PID allocator, parent/child, waiters, handles и cleanup.
+- [ ] PID allocator и bounded process table.
+- [ ] Parent/child relationship, exit status, waiters и deterministic cleanup.
 - [ ] User page fault/invalid opcode завершают процесс, не kernel.
 - [ ] Negative CI: bad pointer, NX execute, write-to-code, stack overflow, malformed ELF.
+
+### Runtime и shell
+
+- [ ] Rust user `_start`, panic strategy и syscall wrappers.
+- [ ] Отдельный user app Cargo target/build pipeline.
 - [ ] Перенести shell в user space.
 
 ## M2 IPC, VM и storage
@@ -45,7 +42,7 @@
 
 ## Следующий пакет
 
-1. ELF entry execution + syscall exit QEMU smoke.
-2. Process table + wait/cleanup + fault isolation.
+1. Process table + wait/cleanup semantics.
+2. User fault isolation + negative QEMU tests.
 3. IRET fallback + scheduler-backed sleep.
-4. Channels + shared memory.
+4. Rust user runtime and shell migration.
