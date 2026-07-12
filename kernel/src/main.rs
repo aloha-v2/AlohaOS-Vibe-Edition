@@ -26,6 +26,7 @@ mod serial;
 mod shell;
 mod smoke;
 mod sync;
+mod syscall;
 mod task_context;
 mod task_stacks;
 mod timer;
@@ -77,8 +78,7 @@ pub extern "sysv64" fn _start(boot_info: *const BootInfo) -> ! {
     let block_ready = virtio_blk::init();
     let fat_ready = block_ready && fat32::init();
     serial::info(format_args!(
-        "storage: virtio_blk={}, fat32={}",
-        block_ready, fat_ready
+        "storage: virtio_blk={}, fat32={}", block_ready, fat_ready
     ));
     scheduler::init();
     unsafe {
