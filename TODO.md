@@ -14,10 +14,10 @@
 - [x] Убрать глобальные `static mut` из горячих подсистем и descriptor tables.
 - [x] Реализовать освобождение и повторное использование одиночных физических фреймов. Coalescing contiguous ranges отложен до process address spaces.
 - [x] Добавить kernel log, serial output в COM1 и уровни log severity.
-- [ ] Добавить symbol table/backtrace для panic screen.
-- [ ] Создать QEMU smoke tests: boot, exceptions, heap, scheduler, disk, keyboard. Сейчас автоматизированы build, boot/storage smoke и scheduler stress.
+- [x] Добавить bounded frame-pointer backtrace и офлайн-символизацию panic addresses.
+- [x] Создать QEMU smoke tests: boot, exceptions, heap, scheduler, disk, keyboard.
 
-**Готово, когда:** несколько задач работают час без Double Fault, утечек и зависаний.
+**Готово:** несколько задач прошли часовой QEMU stress без Double Fault и зависаний; build, boot/storage, subsystem, exception и scheduler CI jobs зелёные.
 
 ### Подтверждённый статус M0
 
@@ -26,7 +26,8 @@
 - Task-context mutex/semaphore/wait queue паркуют задачи вместо busy loop; IRQ paths используют отдельный spinlock.
 - Physical frame allocator защищён IRQ-safe lock и повторно использует освобождённые 4 KiB frames.
 - Physical allocator, FAT32, framebuffer, VirtIO Block, GDT/TSS и IDT не используют `static mut`.
-- Следующий шаг: panic backtrace, затем недостающие QEMU smoke tests.
+- Panic/fatal paths печатают bounded backtrace; matching ELF символизируется скриптом.
+- QEMU CI покрывает boot/storage, heap allocations, frame reclamation, keyboard decode, breakpoint exception и scheduler stress.
 
 ## 2. ACPI, APIC и современное железо
 
@@ -165,7 +166,7 @@
 
 ## 12. Рекомендуемые milestone-релизы
 
-- [ ] **M0 Kernel Stable:** exceptions, memory, full scheduler, tests.
+- [x] **M0 Kernel Stable:** exceptions, memory, full scheduler, tests.
 - [ ] **M1 Userland:** Ring 3, syscalls, ELF apps, user shell.
 - [ ] **M2 Storage:** VFS, writable FAT32, persistent settings.
 - [ ] **M3 Graphics:** mouse, VirtIO GPU, compositor, windows.
@@ -174,8 +175,8 @@
 
 ## Ближайшие задачи
 
-1. Добавить symbol table/backtrace для panic screen.
-2. Расширить QEMU smoke tests на exceptions, heap и keyboard.
-3. После закрытия M0 начать Ring 3, user address spaces и минимальные syscalls.
-4. Затем перенести shell в user space.
-5. После userland строить VFS поверх VirtIO Block/FAT32.
+1. Добавить ring-3 code/data descriptors и TSS `RSP0`.
+2. Создать отдельный PML4 и USER/NX mappings для первого процесса.
+3. Реализовать минимальный безопасный `syscall/sysret` path: `write`, `exit`, `sleep`.
+4. Загрузить первую user-mode программу и изолировать её падение.
+5. Затем перенести shell из Ring 0 в user space.
