@@ -86,16 +86,25 @@ fn process_foundation_smoke() {
 fn syscall_dispatch_smoke() {
     let mut process = process::Process::new(9).unwrap();
     let data = process.user_stack_top - memory::FRAME_SIZE;
+    let code_entry = process.entry;
     process.address_space.copy_to_user(data, b"syscall").unwrap();
 
     let write = syscall::dispatch(&mut process, syscall::SYS_WRITE, [data, 7, 0, 0, 0, 0]);
     assert_eq!(write.value, 7);
     assert!(!write.terminated);
-    let bad = syscall::dispatch(&mut process, syscall::SYS_WRITE, [process.entry, 999, 0, 0, 0, 0]);
+
+    // Capture fields before borrowing the whole Process mutably for dispatch.
+    let bad = syscall::dispatch(
+        &mut process,
+        syscall::SYS_WRITE,
+        [code_entry, 999, 0, 0, 0, 0],
+    );
     assert_eq!(bad.value, syscall::Errno::TooLarge.encoded());
+
     let sleep = syscall::dispatch(&mut process, syscall::SYS_SLEEP, [1, 0, 0, 0, 0, 0]);
     assert_eq!(sleep.value, 0);
     assert_eq!(process.state, process::ProcessState::Sleeping);
+
     let exit = syscall::dispatch(&mut process, syscall::SYS_EXIT, [23, 0, 0, 0, 0, 0]);
     assert!(exit.terminated);
     assert_eq!(process.exit_code, 23);
