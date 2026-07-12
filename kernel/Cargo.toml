@@ -8,6 +8,7 @@ default = []
 scheduler-stress = []
 m0-smoke = []
 exception-smoke = []
+ring3-smoke = []
 
 [[bin]]
 name = "kernel"
