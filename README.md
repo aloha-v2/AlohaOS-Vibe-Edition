@@ -4,41 +4,27 @@
 
 ## Работает сейчас
 
-- UEFI ELF loader, framebuffer и UEFI memory map handoff.
-- GDT, TSS, IDT, ISR, отдельные IST stacks и kernel panic screen.
+- M0 Kernel Stable: scheduler, synchronization, frame reclamation, panic backtrace и QEMU smoke tests.
 - Ring 3 code/data descriptors и отдельный 32 KiB TSS `RSP0` stack.
-- Physical frame allocator с возвратом одиночных frames, 4-level paging и higher-half direct map.
-- 1 MiB bump heap для ранних kernel objects, `Box`, `Vec` и `String`.
-- PIC 8259, PIT 100 Hz, uptime и PS/2 keyboard.
-- Полный x86_64 task context: GPR/IRET frame, CR3, FS/GS и XSAVE/XRSTOR.
-- Task lifecycle: Ready, Running, Blocked, Sleeping и Dead.
-- Отдельные 16 KiB kernel stacks с unmapped guard pages.
-- Preemptive round-robin включён по умолчанию и прошёл часовой QEMU stress без Double Fault.
-- IRQ-safe spinlock, scheduler-aware mutex, semaphore и wait queue.
-- Allocation-free COM1 logger с уровнями DEBUG, INFO и ERROR.
-- Bounded panic backtrace с офлайн-символизацией через `scripts/symbolize-backtrace.py`.
-- Горячие подсистемы и descriptor tables больше не используют `static mut`.
-- Legacy VirtIO Block сериализует DMA queue и request state через scheduler-aware mutex.
-- Read-only FAT32: `ls /`, `cat hello.txt`; mount state защищён IRQ-safe lock.
-- GitHub Actions: release build и пять QEMU/CI проверок.
+- Per-process PML4 roots с выделенным user region и USER/NX page mappings.
+- UEFI loader, framebuffer console, PS/2 keyboard, VirtIO Block и read-only FAT32.
+- COM1 logging, shell и пять CI/QEMU jobs.
+
+## Текущий этап: M1 Userland
+
+Готовы Ring 3 descriptors, `RSP0` и базовый `AddressSpace`: новый PML4 наследует kernel mappings, но получает отдельный user PML4 slot. User code pages read-only executable, data/stack pages writable NX; owned page-table/data frames освобождаются вместе с address space.
+
+Следующее: переключение CR3 для процесса, вход в Ring 3 через `iretq`, затем минимальный безопасный syscall path. Desktop всё ещё ждёт, и правильно делает.
+
+Подробный статус: [TODO.md](TODO.md).
 
 ## Windows
-
-Установи Rust, QEMU и Python, затем из корня репозитория:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\run-qemu.ps1
 ```
 
-## Текущий этап: M1 Userland
-
-**M0 Kernel Stable завершён.** Первый шаг M1 готов: GDT содержит Ring 3 code/data descriptors, а TSS получает отдельный `RSP0` stack для безопасного входа из user mode.
-
-Следующий шаг: отдельный PML4 процесса и USER/NX mappings, затем минимальный syscall path. Desktop пока не трогаем, ядро сначала должно научиться изолировать приложения.
-
-Подробный статус: [TODO.md](TODO.md).
-
 ## Лицензия
 
-PolyForm Noncommercial License 1.0.0: использование, изменение и распространение разрешены только в некоммерческих целях. См. [LICENSE.md](LICENSE.md).
+PolyForm Noncommercial License 1.0.0. См. [LICENSE.md](LICENSE.md).

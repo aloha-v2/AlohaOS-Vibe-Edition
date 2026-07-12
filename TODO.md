@@ -1,68 +1,51 @@
 # AlohaOS Roadmap
 
-Цель: стабильная x86_64 ОС с user space, графическим сервером, рабочим столом, GUI-приложениями и настройками.
+Цель: стабильная x86_64 ОС с изолированным user space, VFS, драйверами, графическим сервером и desktop applications.
 
-## 1. Стабильность ядра
+## M0 Kernel Stable
 
-- [x] Полный x86_64 context switch: GPR, RIP, RSP, RFLAGS, CR3, FS/GS, XSAVE/XRSTOR.
-- [x] Lifecycle задач, guarded kernel stacks и preemptive round-robin.
-- [x] Spinlock, mutex, semaphore, wait queue и IRQ-safe locking.
-- [x] Frame reclamation, COM1 logging, panic backtrace и QEMU smoke tests.
-- [x] **M0 Kernel Stable:** build, boot/storage, subsystem, exception и scheduler checks зелёные.
+- [x] Full x86_64 context, lifecycle, guarded stacks и preemptive scheduler.
+- [x] IRQ-safe synchronization, frame reclamation и shared-state cleanup.
+- [x] COM1 logging, panic backtrace и QEMU smoke tests.
 
-## 2. ACPI, APIC и современное железо
+## M1 Userland: процессы, Ring 3 и syscalls
 
-- [ ] Передавать RSDP из AlohaBoot в `BootInfo`.
-- [ ] Парсить RSDT/XSDT, MADT, FADT, HPET и MCFG.
-- [ ] Перейти с PIC 8259 на Local APIC + I/O APIC.
-- [ ] Добавить APIC timer или HPET и точные monotonic clocks.
-- [ ] Реализовать SMP bootstrap, ACPI reboot/shutdown и PCIe enumeration.
-
-## 3. Процессы, Ring 3 и системные вызовы
-
-- [x] Добавить ring-3 code/data descriptors и TSS `RSP0`.
-- [ ] Создавать отдельный PML4 для каждого процесса.
-- [ ] Мапить user pages с флагами USER и NX.
-- [ ] Реализовать независимые address spaces, позже copy-on-write.
-- [ ] Настроить `syscall/sysret` с безопасной проверкой адресов.
-- [ ] Начальные syscalls: `exit`, `write`, `read`, `open`, `close`, `stat`, `mmap`, `sleep`, `spawn`, `wait`.
-- [ ] Добавить handles/file descriptors и таблицу ресурсов процесса.
-- [ ] Реализовать ELF loader для user-space программ.
+- [x] Ring 3 code/data descriptors и TSS `RSP0`.
+- [x] Отдельный PML4 root и выделенный user virtual region для процесса.
+- [x] USER mappings с W^X: executable code read-only, writable data/stack NX.
+- [ ] Безопасное переключение CR3 между kernel task и process address space.
+- [ ] Первый вход в Ring 3 через `iretq` и возврат в kernel только через контролируемый trap.
+- [ ] Настроить `syscall/sysret`: STAR/LSTAR/FMASK, canonical address checks и отдельный kernel entry stack.
+- [ ] Минимальные syscalls: `write`, `exit`, `sleep`; затем `read`, `open`, `close`, `stat`, `mmap`, `spawn`, `wait`.
+- [ ] Проверять каждый user pointer, длину, overflow и границы mappings до чтения/записи kernel.
+- [ ] Process structure: PID, state, CR3, kernel stack, user stack, handles и exit code.
+- [ ] ELF64 loader: validate headers/segments, enforce W^X, zero BSS, reject malformed binaries.
+- [ ] Изолировать user page fault/invalid opcode: завершать только процесс, не kernel.
 - [ ] Перенести shell из Ring 0 в user space.
-- [ ] Изолировать падение приложения от ядра и других процессов.
 
-**Готово, когда:** user-программа печатает текст, читает файл, падает и не валит kernel.
+**M1 готов, когда:** user ELF печатает текст, читает файл, sleep/wait работает, а его crash не валит kernel.
 
-## 4. VFS и постоянная файловая система
+## M2 Storage
 
-- [ ] VFS API: inode, file, directory, mount point и path resolver.
-- [ ] FAT32 как VFS driver: LFN, write/create/truncate/delete/rename.
-- [ ] Block cache, dirty-page flushing, RAM filesystem для `/tmp`.
-- [ ] Дерево `/bin`, `/apps`, `/system`, `/users`, `/tmp`, `/devices`.
+- [ ] VFS: inode/file/directory/mount/path resolver.
+- [ ] FAT32 VFS driver: subdirectories, LFN, write/create/truncate/delete/rename.
+- [ ] Block cache, flush, crash-safe metadata updates и RAM filesystem `/tmp`.
+- [ ] File descriptors, permissions и дерево `/bin /apps /system /users /tmp /devices`.
 
-## 5. Драйверная модель и базовые устройства
+## M3 Hardware and graphics foundation
 
-- [ ] Device manager и единый driver API.
-- [ ] VirtIO Block interrupts, несколько запросов, write и flush.
-- [ ] Mouse/input, keyboard layouts/repeat/Unicode и VirtIO GPU.
-- [ ] Double buffering, page flipping, EDID, RTC и wall-clock.
+- [ ] RSDP/ACPI tables, APIC/HPET, SMP, reboot/shutdown и PCIe MCFG.
+- [ ] Device manager, VirtIO Block async/write/flush, mouse/input, VirtIO GPU, RTC.
+- [ ] Double buffering, modes/EDID, networking basics и позже audio.
 
-## 6-11. Graphics, desktop, apps, settings, security
+## M4-M5 Desktop
 
-После стабильных userland, VFS и device APIs: compositor, IPC, GUI toolkit, desktop shell, приложения, настройки, networking и hardening.
-
-## 12. Milestones
-
-- [x] **M0 Kernel Stable**
-- [ ] **M1 Userland**
-- [ ] **M2 Storage**
-- [ ] **M3 Graphics**
-- [ ] **M4 Desktop**
-- [ ] **M5 Daily Usable Demo**
+После стабильных process ABI, VFS и drivers: IPC/shared memory, compositor, GUI toolkit, desktop shell, apps, settings, package format и hardening.
 
 ## Ближайшие задачи
 
-1. Создать отдельный PML4 и USER/NX mappings для первого процесса.
-2. Реализовать минимальный безопасный `syscall/sysret` path: `write`, `exit`, `sleep`.
-3. Загрузить первую user-mode программу и изолировать её падение.
-4. Затем перенести shell из Ring 0 в user space.
+1. Добавить safe CR3 activation guard и проверить возврат в kernel address space.
+2. Подготовить минимальные user code/stack mappings и `iretq` trampoline.
+3. Настроить syscall entry с `write`, `exit`, `sleep` и user-pointer validation.
+4. Добавить Process/ELF loader и crash isolation tests.
+5. Перенести shell в user space, затем начать VFS.

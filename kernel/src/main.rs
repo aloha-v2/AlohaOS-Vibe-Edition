@@ -8,6 +8,7 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use core::panic::PanicInfo;
 use common::BootInfo;
 
+mod address_space;
 mod backtrace;
 mod fat32;
 mod font;
