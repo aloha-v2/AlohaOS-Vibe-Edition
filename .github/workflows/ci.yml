@@ -1,10 +1,13 @@
 name: AlohaOS CI
+
 on:
   push:
     branches: [main, "brain/**"]
   pull_request:
+
 permissions:
   contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,6 +17,7 @@ jobs:
       - run: |
           cargo build --release --target x86_64-unknown-uefi -p alohaboot
           cargo build --release --target x86_64-unknown-none -p kernel
+
   qemu-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -47,6 +51,70 @@ jobs:
           grep -q "interrupts enabled, starting shell" serial.log
           grep -q "storage: virtio_blk=true, fat32=true" serial.log
           ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' serial.log
+
+  m0-subsystem-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build M0 smoke kernel
+        run: |
+          make esp PROFILE=release KERNEL_FEATURES=m0-smoke
+          mkdir -p disk
+          python3 scripts/create-fat32.py disk/aloha-fat32.img
+      - name: Verify heap, frame reclamation and keyboard decoder
+        shell: bash
+        run: |
+          OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
+          set +e
+          timeout 15s qemu-system-x86_64 -machine q35 -cpu max -m 256M \
+            -drive "if=pflash,format=raw,readonly=on,file=$OVMF" \
+            -drive "format=raw,file=fat:rw:esp" \
+            -drive "if=none,id=aloha-disk,format=raw,file=disk/aloha-fat32.img" \
+            -device "virtio-blk-pci,drive=aloha-disk,disable-modern=on" \
+            -display none -monitor none -serial file:m0-smoke.log -net none -no-reboot
+          status=$?
+          set -e
+          cat m0-smoke.log
+          test "$status" -eq 124
+          grep -q "m0-smoke: heap passed" m0-smoke.log
+          grep -q "m0-smoke: frame reclamation passed" m0-smoke.log
+          grep -q "m0-smoke: keyboard decode passed" m0-smoke.log
+          grep -q "m0-smoke: heap keyboard memory passed" m0-smoke.log
+          ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' m0-smoke.log
+
+  exception-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build exception smoke kernel
+        run: make esp PROFILE=release KERNEL_FEATURES=exception-smoke
+      - name: Verify breakpoint exception path
+        shell: bash
+        run: |
+          OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
+          set +e
+          timeout 10s qemu-system-x86_64 -machine q35 -cpu max -m 256M \
+            -drive "if=pflash,format=raw,readonly=on,file=$OVMF" \
+            -drive "format=raw,file=fat:rw:esp" \
+            -display none -monitor none -serial file:exception.log -net none -no-reboot
+          status=$?
+          set -e
+          cat exception.log
+          test "$status" -eq 124
+          grep -q "exception-smoke: triggering breakpoint" exception.log
+          grep -q "CPU EXCEPTION vector=3" exception.log
+          ! grep -Eiq 'DOUBLE FAULT|kernel panic' exception.log
+
   scheduler-stress:
     runs-on: ubuntu-latest
     timeout-minutes: 10
