@@ -7,13 +7,13 @@
 - M0 Kernel Stable и полный QEMU regression suite.
 - Ring 3, per-process address spaces, W^X, safe user copies и process-owned kernel stacks.
 - Реальный SYSCALL/SYSRET путь для user `write` и `exit`.
-- Allocation-free ELF64 validator строит bounded load plan.
-- Проверяются ELF magic/class/endian/type/machine, header bounds, PT_LOAD ranges и entry point.
-- W^X, user-region bounds, segment overlap и BSS (`memsz - filesz`) входят в validation policy.
+- ELF64 validator и реальный PT_LOAD loader.
+- Loader мапит user pages с финальными W^X permissions, копирует file bytes через physical ownership и явно обнуляет BSS.
+- ELF entry устанавливается в Process; loader smoke проверяет file image и zero-filled tail.
 
 ## Текущий этап: M1 Userland
 
-ELF parsing и безопасный load plan готовы. Следующий пакет реально мапит PT_LOAD pages в Process, копирует file bytes, обнуляет BSS и запускает ELF entry; затем process table и fault isolation.
+Теперь ELF не только валидируется, но реально загружается в process address space. Следующий пакет запускает ELF entry end-to-end, затем добавляет process table, wait/cleanup и изоляцию user faults.
 
 Подробный статус: [TODO.md](TODO.md).
 
