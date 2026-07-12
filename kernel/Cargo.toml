@@ -9,6 +9,7 @@ scheduler-stress = []
 m0-smoke = []
 exception-smoke = []
 ring3-smoke = []
+syscall-smoke = []
 
 [[bin]]
 name = "kernel"

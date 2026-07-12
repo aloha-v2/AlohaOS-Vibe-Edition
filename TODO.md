@@ -6,33 +6,32 @@
 
 ## M1 Userland
 
-### Process memory и Ring 3
+### Ring 3 и process memory
 
 - [x] Ring 3 descriptors, TSS `RSP0`, per-process PML4, USER/NX W^X и safe user copies.
-- [x] Process lifecycle, CR3 guard, owned kernel entry stacks и Ring 3 round-trip.
+- [x] Process lifecycle, CR3 guard, owned kernel entry stacks и Ring 3 `iretq` round-trip.
 
-### Syscall ABI и architecture
+### Production syscall path
 
-- [x] Versioned numbers, errno и dispatcher для `write/exit/sleep`.
-- [x] Canonical RIP/RSP checks, RFLAGS sanitization и return-path classification.
-- [x] CPUID SYSCALL capability check.
-- [x] Настроить и readback-проверить EFER.SCE, STAR, LSTAR и FMASK.
-- [x] Формализовать `SyscallFrame`: number, 6 args, user RIP/RFLAGS/RSP, result.
-- [x] Регистрация active per-process kernel entry stack.
-- [x] Fail-closed LSTAR stub до готовности полного trampoline.
-- [ ] Assembly entry сохраняет user RSP/RCX/R11 и callee-saved registers.
-- [ ] Переключить RSP на active process kernel stack до вызова Rust.
-- [ ] Вызвать dispatcher через `SyscallFrame` и обработать terminated/sleeping state.
-- [ ] Проверенный SYSRET fast path и IRET fallback.
-- [ ] QEMU smoke с настоящей инструкцией `syscall` для `write/exit/sleep`.
-- [ ] Затем `read/open/close/stat/mmap/spawn/wait` и handles.
+- [x] Versioned ABI, errno и dispatcher для `write/exit/sleep`.
+- [x] EFER.SCE, STAR, LSTAR, FMASK и readback validation.
+- [x] Assembly LSTAR entry сохраняет syscall number, 6 args, user RIP/RFLAGS/RSP.
+- [x] Переключение с user RSP на active process kernel stack до Rust.
+- [x] Dispatcher bridge и validated SYSRET fast path.
+- [x] `exit` возвращает управление suspended kernel frame и сохраняет exit code.
+- [x] QEMU real-syscall smoke: user `write`, SYSRET continuation, user `exit`.
+- [ ] Реализовать IRET fallback для допустимых, но небезопасных для SYSRET frames.
+- [ ] Подключить `sleep` к scheduler deadline и возобновлению процесса.
+- [ ] Добавить `read/open/close/stat/mmap/spawn/wait` и handle table.
 
-### ELF, runtime и isolation
+### ELF, process table и isolation
 
-- [ ] ELF64 validation, PT_LOAD W^X, BSS zeroing и overlap rejection.
-- [ ] Process table, parent/child, waiters и cleanup.
-- [ ] User faults завершают процесс, не kernel.
-- [ ] Rust user runtime, syscall wrappers, app build и user-space shell.
+- [ ] ELF64 validation: magic/class/machine/type/header bounds.
+- [ ] PT_LOAD mappings, W^X, BSS zeroing и overlap rejection.
+- [ ] Process table: PID allocation, parent/child, waiters и cleanup.
+- [ ] User page fault/invalid opcode завершают процесс, не kernel.
+- [ ] Negative CI: bad pointer, NX execution, write-to-code, stack overflow, malformed ELF.
+- [ ] Rust user runtime, wrappers, app Cargo build и user-space shell.
 
 ## M2 IPC, VM и storage
 
@@ -46,7 +45,7 @@
 
 ## Следующий пакет
 
-1. Full assembly LSTAR trampoline на process kernel stack.
-2. Dispatcher bridge + SYSRET/IRET return.
-3. Real-syscall QEMU smoke `write/exit/sleep`.
-4. ELF loader + process table + fault isolation.
+1. IRET fallback + real scheduler-backed sleep.
+2. ELF64 parser/loader + malformed-image tests.
+3. Process table, wait/cleanup и user-fault isolation.
+4. Channels + shared memory.

@@ -5,16 +5,15 @@
 ## Готово
 
 - M0 Kernel Stable: scheduler, memory, synchronization, diagnostics и QEMU regression suite.
-- Ring 3, per-process address spaces, W^X, safe user copies и process-owned kernel entry stacks.
+- Ring 3, per-process PML4, W^X, safe user copies и process-owned kernel entry stacks.
 - Versioned syscall ABI и dispatcher для `write`, `exit`, `sleep`.
-- EFER.SCE, STAR, LSTAR и FMASK настраиваются и проверяются readback.
-- Формализован `SyscallFrame` с шестью аргументами, user RIP/RFLAGS/RSP и result.
-- Active process устанавливает собственный kernel entry stack до будущего assembly entry.
-- LSTAR пока fail-closed: ранний `syscall` останавливает CPU, а не выполняет Rust на user stack.
+- EFER/STAR/LSTAR/FMASK, full assembly entry, switch с user RSP на process kernel stack и register frame.
+- Реальный user `syscall` вызывает `write`, возвращается через validated `sysretq`, затем `exit` возвращает управление kernel.
+- Отдельный QEMU syscall smoke проверяет LSTAR, dispatcher, SYSRET и process exit end-to-end.
 
 ## Текущий этап: M1 Userland
 
-MSR contract и register context готовы. Следующий пакет заменит fail-closed LSTAR stub полноценным assembly trampoline: сохранить user state, перейти на process stack, вызвать dispatcher и вернуть через проверенный SYSRET/IRET path.
+Первый настоящий syscall round-trip готов. Следующий пакет: IRET fallback для сложных return frames, реальный `sleep`, process table, ELF64 loader и fault isolation.
 
 Подробный статус: [TODO.md](TODO.md).
 
