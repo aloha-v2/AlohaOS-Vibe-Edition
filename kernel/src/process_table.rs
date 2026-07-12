@@ -25,6 +25,7 @@ impl ProcessRecord {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TableError {
     Full,
+    AlreadyExists,
     NoSuchProcess,
     NotChild,
     StillRunning,
@@ -50,22 +51,21 @@ impl ProcessTable {
             }
         }
     }
+
+    fn empty_slot(&self) -> Result<usize, TableError> {
+        self.records
+            .iter()
+            .position(|record| record.pid == NO_PID)
+            .ok_or(TableError::Full)
+    }
 }
 
 static TABLE: IrqSpinLock<ProcessTable> = IrqSpinLock::new(ProcessTable::EMPTY);
 
 pub fn spawn(parent: Option<u64>) -> Result<u64, TableError> {
     let mut table = TABLE.lock();
-    if let Some(parent) = parent {
-        if !table.records.iter().any(|record| record.pid == parent) {
-            return Err(TableError::NoSuchProcess);
-        }
-    }
-    let slot = table
-        .records
-        .iter()
-        .position(|record| record.pid == NO_PID)
-        .ok_or(TableError::Full)?;
+    validate_parent(&table, parent)?;
+    let slot = table.empty_slot()?;
     let pid = table.allocate_pid();
     table.records[slot] = ProcessRecord {
         pid,
@@ -76,27 +76,67 @@ pub fn spawn(parent: Option<u64>) -> Result<u64, TableError> {
     Ok(pid)
 }
 
+/// Register an already-created Process object in the metadata table.
+pub fn register(pid: u64, parent: Option<u64>) -> Result<(), TableError> {
+    if pid == NO_PID {
+        return Err(TableError::NoSuchProcess);
+    }
+    let mut table = TABLE.lock();
+    if table.records.iter().any(|record| record.pid == pid) {
+        return Err(TableError::AlreadyExists);
+    }
+    validate_parent(&table, parent)?;
+    let slot = table.empty_slot()?;
+    table.records[slot] = ProcessRecord {
+        pid,
+        parent: parent.unwrap_or(NO_PID),
+        state: ProcessState::Ready,
+        exit_code: 0,
+    };
+    if table.next_pid <= pid {
+        table.next_pid = pid.saturating_add(1).max(1);
+    }
+    Ok(())
+}
+
+fn validate_parent(table: &ProcessTable, parent: Option<u64>) -> Result<(), TableError> {
+    if let Some(parent) = parent {
+        if !table.records.iter().any(|record| record.pid == parent) {
+            return Err(TableError::NoSuchProcess);
+        }
+    }
+    Ok(())
+}
+
 pub fn set_state(pid: u64, state: ProcessState) -> Result<(), TableError> {
     let mut table = TABLE.lock();
-    let record = table
-        .records
-        .iter_mut()
-        .find(|record| record.pid == pid)
-        .ok_or(TableError::NoSuchProcess)?;
+    let record = find_mut(&mut table, pid)?;
     record.state = state;
     Ok(())
 }
 
 pub fn exit(pid: u64, code: i32) -> Result<(), TableError> {
     let mut table = TABLE.lock();
-    let record = table
-        .records
-        .iter_mut()
-        .find(|record| record.pid == pid)
-        .ok_or(TableError::NoSuchProcess)?;
+    let record = find_mut(&mut table, pid)?;
     record.state = ProcessState::Exited;
     record.exit_code = code;
     Ok(())
+}
+
+pub fn fault(pid: u64, code: i32) -> Result<(), TableError> {
+    let mut table = TABLE.lock();
+    let record = find_mut(&mut table, pid)?;
+    record.state = ProcessState::Faulted;
+    record.exit_code = code;
+    Ok(())
+}
+
+fn find_mut(table: &mut ProcessTable, pid: u64) -> Result<&mut ProcessRecord, TableError> {
+    table
+        .records
+        .iter_mut()
+        .find(|record| record.pid == pid)
+        .ok_or(TableError::NoSuchProcess)
 }
 
 pub fn lookup(pid: u64) -> Option<ProcessRecord> {
@@ -108,14 +148,9 @@ pub fn lookup(pid: u64) -> Option<ProcessRecord> {
         .find(|record| record.pid == pid)
 }
 
-/// Reap an exited child and return its status. Running children are retained.
 pub fn wait(parent: u64, child: u64) -> Result<i32, TableError> {
     let mut table = TABLE.lock();
-    let record = table
-        .records
-        .iter_mut()
-        .find(|record| record.pid == child)
-        .ok_or(TableError::NoSuchProcess)?;
+    let record = find_mut(&mut table, child)?;
     if record.parent != parent {
         return Err(TableError::NotChild);
     }
@@ -127,7 +162,6 @@ pub fn wait(parent: u64, child: u64) -> Result<i32, TableError> {
     Ok(status)
 }
 
-/// Reparent live children to the kernel (PID 0) when a parent exits.
 pub fn orphan_children(parent: u64) -> usize {
     let mut table = TABLE.lock();
     let mut count = 0;
