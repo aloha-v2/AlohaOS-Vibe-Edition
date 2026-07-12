@@ -6,28 +6,35 @@
 
 ## M1 Userland
 
-### Ring 3, syscall и ELF
+### Ring 3, syscalls и ELF
 
-- [x] Ring 3, per-process PML4, W^X, CR3 guard и safe user copies.
-- [x] Process-owned kernel stacks, LSTAR entry, dispatcher и validated SYSRET.
-- [x] Real user `write` и `exit` syscall QEMU smoke.
-- [x] ELF64 validation, PT_LOAD mapping, file copy и BSS zeroing.
-- [x] Загруженный ELF выполняется с `e_entry` и завершает процесс syscall `exit`.
-- [x] Отдельный ELF execution QEMU CI job.
-- [ ] IRET fallback и scheduler-backed `sleep` resume.
+- [x] Per-process memory, W^X, safe copies, kernel stacks и Ring 3 entry.
+- [x] Real LSTAR/SYSRET user `write`/`exit` path.
+- [x] ELF validation, PT_LOAD mapping, BSS zeroing и ELF execution smoke.
+- [ ] IRET fallback и scheduler-backed `sleep`.
 - [ ] `read/open/close/stat/mmap/spawn/wait` и handle table.
 
-### Process table и isolation
+### Process table
 
-- [ ] PID allocator и bounded process table.
-- [ ] Parent/child relationship, exit status, waiters и deterministic cleanup.
-- [ ] User page fault/invalid opcode завершают процесс, не kernel.
-- [ ] Negative CI: bad pointer, NX execute, write-to-code, stack overflow, malformed ELF.
+- [x] Bounded process registry и monotonic nonzero PID allocation.
+- [x] Parent/child metadata и lifecycle state.
+- [x] Exit status, wait/reap и protection от wait живого процесса.
+- [x] Reparent orphan children к kernel PID 0.
+- [x] Process table smoke coverage.
+- [ ] Связать registry с owned Process objects и syscall spawn/exit/wait.
+- [ ] Blocking wait queue вместо polling `StillRunning`.
+
+### Fault isolation
+
+- [ ] Определять CPL по exception CS.
+- [ ] User page fault/invalid opcode переводят только текущий Process в Faulted.
+- [ ] Возврат на kernel process runner без panic kernel.
+- [ ] Negative QEMU tests: NX execute, write-to-code, stack guard, bad pointer.
 
 ### Runtime и shell
 
 - [ ] Rust user `_start`, panic strategy и syscall wrappers.
-- [ ] Отдельный user app Cargo target/build pipeline.
+- [ ] Отдельный user app Cargo pipeline.
 - [ ] Перенести shell в user space.
 
 ## M2 IPC, VM и storage
@@ -36,13 +43,9 @@
 - [ ] Slab, VM areas, demand paging, file mappings и OOM policy.
 - [ ] VFS, writable FAT32, page cache, permissions/capabilities и settings.
 
-## M3-M5
-
-- [ ] ACPI/APIC/SMP, networking/security, graphics/desktop, packages/tooling/docs.
-
 ## Следующий пакет
 
-1. Process table + wait/cleanup semantics.
+1. Registry ownership + spawn/exit/wait syscalls.
 2. User fault isolation + negative QEMU tests.
 3. IRET fallback + scheduler-backed sleep.
-4. Rust user runtime and shell migration.
+4. Channels + shared memory.
