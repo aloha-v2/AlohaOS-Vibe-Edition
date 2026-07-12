@@ -11,7 +11,6 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{gdt, process::Process};
 
-const USER_RFLAGS: u64 = 0x202;
 const NO_MARKER: u64 = u64::MAX;
 
 #[repr(transparent)]
@@ -51,6 +50,7 @@ pub fn run(process: &mut Process) -> u64 {
 pub extern "C" fn rust_user_trap(marker: u64) -> ! {
     LAST_MARKER.store(marker, Ordering::Release);
     let return_rsp = unsafe { *ALOHA_USER_RETURN_RSP.0.get() };
+    let kernel_data = gdt::kernel_data_selector() as u64;
     unsafe {
         asm!(
             "mov ax, {kernel_data:x}",
@@ -59,7 +59,7 @@ pub extern "C" fn rust_user_trap(marker: u64) -> ! {
             "mov ss, ax",
             "mov rsp, {return_rsp}",
             "ret",
-            kernel_data = in(reg) gdt::kernel_data_selector(),
+            kernel_data = in(reg) kernel_data,
             return_rsp = in(reg) return_rsp,
             options(noreturn)
         );
