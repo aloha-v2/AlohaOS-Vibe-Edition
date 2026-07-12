@@ -16,22 +16,22 @@
 
 ### ELF loader
 
-- [x] ELF64 magic/class/endian/type/machine validation.
-- [x] ELF/program-header bounds и integer-overflow checks.
-- [x] Bounded PT_LOAD plan, user-region enforcement и entry-in-executable validation.
-- [x] W^X rejection, segment overlap rejection и BSS size planning.
-- [x] Valid/malformed/W+X smoke tests.
-- [ ] Мапить все страницы PT_LOAD с итоговыми permissions.
-- [ ] Копировать file bytes через physical ownership и zero-fill BSS.
-- [ ] Поддержать page-aligned overlap внутри одного compatible segment layout.
-- [ ] Запустить Process с ELF entry и guarded stack.
+- [x] ELF64/header/program-header validation и overflow checks.
+- [x] PT_LOAD load plan, user bounds, W^X, overlap и executable entry checks.
+- [x] Реальное page mapping с финальными writable/executable permissions.
+- [x] File bytes copy через physical page ownership.
+- [x] Явное zero-fill BSS через несколько страниц.
+- [x] Loader smoke проверяет загруженные bytes и BSS tail.
+- [ ] Запустить Process с ELF entry end-to-end и syscall exit.
+- [ ] Поддержать несколько compatible PT_LOAD на общей boundary page.
+- [ ] Rust user runtime, syscall wrappers и app Cargo build.
 
 ### Process table и isolation
 
 - [ ] PID allocator, parent/child, waiters, handles и cleanup.
 - [ ] User page fault/invalid opcode завершают процесс, не kernel.
 - [ ] Negative CI: bad pointer, NX execute, write-to-code, stack overflow, malformed ELF.
-- [ ] Rust user runtime, wrappers, app build и user-space shell.
+- [ ] Перенести shell в user space.
 
 ## M2 IPC, VM и storage
 
@@ -45,7 +45,7 @@
 
 ## Следующий пакет
 
-1. PT_LOAD page mapping + file copy + BSS zeroing.
-2. ELF entry execution smoke.
-3. Process table + wait/cleanup + fault isolation.
+1. ELF entry execution + syscall exit QEMU smoke.
+2. Process table + wait/cleanup + fault isolation.
+3. IRET fallback + scheduler-backed sleep.
 4. Channels + shared memory.
