@@ -1,13 +1,136 @@
 //! Feature-gated smoke checks executed by headless QEMU CI.
 
-use alloc::{boxed::Box,string::String,vec::Vec};use core::arch::asm;use crate::{address_space,gdt,heap,keyboard,memory,process,serial};
-#[cfg(feature="m0-smoke")]pub fn run_nonfatal(){heap_smoke();frame_reclamation_smoke();keyboard_smoke();user_descriptor_smoke();process_foundation_smoke();serial::info(format_args!("m0-smoke: heap keyboard memory passed"));}
-#[cfg(not(feature="m0-smoke"))]pub fn run_nonfatal(){}
-#[cfg(feature="m0-smoke")]fn heap_smoke(){let before=heap::stats();let boxed=Box::new(0xa10a_05u64);let values=Vec::from([3u64,5,8,13]);let text=String::from("ALOHA-M0");assert_eq!(*boxed,0xa10a_05);assert_eq!(values.iter().copied().sum::<u64>(),29);assert_eq!(text.as_bytes(),b"ALOHA-M0");assert!(heap::stats().used>before.used);drop((boxed,values,text));serial::info(format_args!("m0-smoke: heap passed"));}
-#[cfg(feature="m0-smoke")]fn frame_reclamation_smoke(){let frame=memory::allocate_frame().unwrap();assert!(unsafe{memory::deallocate_frame(frame)});assert_eq!(memory::allocate_frame().unwrap(),frame);serial::info(format_args!("m0-smoke: frame reclamation passed"));}
-#[cfg(feature="m0-smoke")]fn keyboard_smoke(){keyboard::reset_decoder_for_smoke();assert!(matches!(keyboard::decode(0x10),Some(keyboard::Key::Character(b'q'))));assert!(keyboard::decode(0x2a).is_none());assert!(matches!(keyboard::decode(0x1e),Some(keyboard::Key::Character(b'A'))));assert!(keyboard::decode(0xaa).is_none());assert!(matches!(keyboard::decode(0x1c),Some(keyboard::Key::Enter)));serial::info(format_args!("m0-smoke: keyboard decode passed"));}
-#[cfg(feature="m0-smoke")]fn user_descriptor_smoke(){assert_eq!(gdt::user_data_selector(),0x1b);assert_eq!(gdt::user_code_selector(),0x23);assert_ne!(gdt::rsp0(),0);serial::info(format_args!("m1-smoke: ring3 descriptors and rsp0 passed"));}
-#[cfg(feature="m0-smoke")]fn process_foundation_smoke(){let before=memory::stats().allocated;let mut process=process::Process::new(7).unwrap();let data=process.user_stack_top-memory::FRAME_SIZE;process.address_space.copy_to_user(data,b"ALOHA").unwrap();let mut copied=[0u8;5];process.address_space.copy_from_user(&mut copied,data).unwrap();assert_eq!(&copied,b"ALOHA");assert_eq!(process.address_space.copy_to_user(process.entry,b"X"),Err(address_space::UserAccessError::NotWritable));assert_eq!(process.address_space.validate_user_range(0x0000_8000_0000_0000,8,false),Err(address_space::UserAccessError::NonCanonical));process.exit(42);drop(process);assert_eq!(memory::stats().allocated,before);serial::info(format_args!("m1-smoke: CR3 process user-copy lifecycle passed"));}
-#[cfg(feature="ring3-smoke")]pub fn run_ring3()->!{const MARKER:u32=0xa10a_0033;let image=[0xb8,(MARKER&0xff)as u8,((MARKER>>8)&0xff)as u8,((MARKER>>16)&0xff)as u8,((MARKER>>24)&0xff)as u8,0xcd,0x80,0x0f,0x0b];let mut process=process::Process::new(33).expect("ring3 process setup failed");assert!(process.load_bootstrap_image(&image));serial::info(format_args!("ring3-smoke: entering user mode"));let marker=crate::user_mode::run(&mut process);assert_eq!(marker,MARKER as u64);assert_eq!(process.state,process::ProcessState::Exited);serial::info(format_args!("ring3-smoke: user iretq rsp0 trap passed"));crate::halt()}
-#[cfg(feature="exception-smoke")]pub fn trigger_exception()->!{serial::info(format_args!("exception-smoke: triggering breakpoint"));unsafe{asm!("int3",options(nomem,nostack))};panic!("breakpoint handler returned")}
-#[cfg(not(feature="exception-smoke"))]pub fn trigger_exception(){}
+use alloc::{boxed::Box, string::String, vec::Vec};
+use core::arch::asm;
+
+use crate::{address_space, gdt, heap, keyboard, memory, process, serial, syscall};
+
+#[cfg(feature = "m0-smoke")]
+pub fn run_nonfatal() {
+    heap_smoke();
+    frame_reclamation_smoke();
+    keyboard_smoke();
+    user_descriptor_smoke();
+    process_foundation_smoke();
+    syscall_dispatch_smoke();
+    serial::info(format_args!("m0-smoke: heap keyboard memory passed"));
+}
+#[cfg(not(feature = "m0-smoke"))]
+pub fn run_nonfatal() {}
+
+#[cfg(feature = "m0-smoke")]
+fn heap_smoke() {
+    let before = heap::stats();
+    let boxed = Box::new(0xa10a_05u64);
+    let values = Vec::from([3u64, 5, 8, 13]);
+    let text = String::from("ALOHA-M0");
+    assert_eq!(*boxed, 0xa10a_05);
+    assert_eq!(values.iter().copied().sum::<u64>(), 29);
+    assert_eq!(text.as_bytes(), b"ALOHA-M0");
+    assert!(heap::stats().used > before.used);
+    drop((boxed, values, text));
+    serial::info(format_args!("m0-smoke: heap passed"));
+}
+
+#[cfg(feature = "m0-smoke")]
+fn frame_reclamation_smoke() {
+    let frame = memory::allocate_frame().unwrap();
+    assert!(unsafe { memory::deallocate_frame(frame) });
+    assert_eq!(memory::allocate_frame().unwrap(), frame);
+    serial::info(format_args!("m0-smoke: frame reclamation passed"));
+}
+
+#[cfg(feature = "m0-smoke")]
+fn keyboard_smoke() {
+    keyboard::reset_decoder_for_smoke();
+    assert!(matches!(keyboard::decode(0x10), Some(keyboard::Key::Character(b'q'))));
+    assert!(keyboard::decode(0x2a).is_none());
+    assert!(matches!(keyboard::decode(0x1e), Some(keyboard::Key::Character(b'A'))));
+    assert!(keyboard::decode(0xaa).is_none());
+    assert!(matches!(keyboard::decode(0x1c), Some(keyboard::Key::Enter)));
+    serial::info(format_args!("m0-smoke: keyboard decode passed"));
+}
+
+#[cfg(feature = "m0-smoke")]
+fn user_descriptor_smoke() {
+    assert_eq!(gdt::user_data_selector(), 0x1b);
+    assert_eq!(gdt::user_code_selector(), 0x23);
+    assert_ne!(gdt::rsp0(), 0);
+    serial::info(format_args!("m1-smoke: ring3 descriptors and rsp0 passed"));
+}
+
+#[cfg(feature = "m0-smoke")]
+fn process_foundation_smoke() {
+    let before = memory::stats().allocated;
+    let mut process = process::Process::new(7).unwrap();
+    let data = process.user_stack_top - memory::FRAME_SIZE;
+    process.address_space.copy_to_user(data, b"ALOHA").unwrap();
+    let mut copied = [0u8; 5];
+    process.address_space.copy_from_user(&mut copied, data).unwrap();
+    assert_eq!(&copied, b"ALOHA");
+    assert_eq!(
+        process.address_space.copy_to_user(process.entry, b"X"),
+        Err(address_space::UserAccessError::NotWritable)
+    );
+    assert_eq!(
+        process.address_space.validate_user_range(0x0000_8000_0000_0000, 8, false),
+        Err(address_space::UserAccessError::NonCanonical)
+    );
+    process.exit(42);
+    drop(process);
+    assert_eq!(memory::stats().allocated, before);
+    serial::info(format_args!("m1-smoke: CR3 process user-copy lifecycle passed"));
+}
+
+#[cfg(feature = "m0-smoke")]
+fn syscall_dispatch_smoke() {
+    let mut process = process::Process::new(9).unwrap();
+    let data = process.user_stack_top - memory::FRAME_SIZE;
+    let code_entry = process.entry;
+    process.address_space.copy_to_user(data, b"syscall").unwrap();
+
+    let write = syscall::dispatch(&mut process, syscall::SYS_WRITE, [data, 7, 0, 0, 0, 0]);
+    assert_eq!(write.value, 7);
+    assert!(!write.terminated);
+
+    // Capture fields before borrowing the whole Process mutably for dispatch.
+    let bad = syscall::dispatch(
+        &mut process,
+        syscall::SYS_WRITE,
+        [code_entry, 999, 0, 0, 0, 0],
+    );
+    assert_eq!(bad.value, syscall::Errno::TooLarge.encoded());
+
+    let sleep = syscall::dispatch(&mut process, syscall::SYS_SLEEP, [1, 0, 0, 0, 0, 0]);
+    assert_eq!(sleep.value, 0);
+    assert_eq!(process.state, process::ProcessState::Sleeping);
+
+    let exit = syscall::dispatch(&mut process, syscall::SYS_EXIT, [23, 0, 0, 0, 0, 0]);
+    assert!(exit.terminated);
+    assert_eq!(process.exit_code, 23);
+    assert_eq!(syscall::ABI_VERSION, 1);
+    serial::info(format_args!("m1-smoke: syscall ABI write exit sleep passed"));
+}
+
+#[cfg(feature = "ring3-smoke")]
+pub fn run_ring3() -> ! {
+    const MARKER: u32 = 0xa10a_0033;
+    let image = [0xb8, (MARKER & 0xff) as u8, ((MARKER >> 8) & 0xff) as u8, ((MARKER >> 16) & 0xff) as u8, ((MARKER >> 24) & 0xff) as u8, 0xcd, 0x80, 0x0f, 0x0b];
+    let mut process = process::Process::new(33).expect("ring3 process setup failed");
+    assert!(process.load_bootstrap_image(&image));
+    serial::info(format_args!("ring3-smoke: entering user mode"));
+    let marker = crate::user_mode::run(&mut process);
+    assert_eq!(marker, MARKER as u64);
+    assert_eq!(process.state, process::ProcessState::Exited);
+    serial::info(format_args!("ring3-smoke: user iretq rsp0 trap passed"));
+    crate::halt()
+}
+
+#[cfg(feature = "exception-smoke")]
+pub fn trigger_exception() -> ! {
+    serial::info(format_args!("exception-smoke: triggering breakpoint"));
+    unsafe { asm!("int3", options(nomem, nostack)) };
+    panic!("breakpoint handler returned")
+}
+#[cfg(not(feature = "exception-smoke"))]
+pub fn trigger_exception() {}
