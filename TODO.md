@@ -1,45 +1,33 @@
 # AlohaOS Roadmap
 
 ## M0 Kernel Stable
-
-- [x] Scheduler, memory, synchronization, diagnostics и QEMU regression suite.
+- [x] Scheduler, memory, synchronization, diagnostics и QEMU suite.
 
 ## M1 Userland
 
-### Ring 3, syscall и ELF
+### Выполнено
+- [x] Ring 3, per-process memory, W^X, safe copies и kernel entry stacks.
+- [x] Real syscalls, ELF loading/execution и process registry.
+- [x] PID/parent/child, exit status, wait/reap и orphan reparenting.
+- [x] Sleep deadlines и time-driven Ready transition.
+- [x] Blocking wait registration и wake parent on child exit/fault.
+- [x] One-shot wake events и smoke coverage.
 
-- [x] Per-process memory, W^X, safe copies, kernel stacks и Ring 3 entry.
-- [x] Real LSTAR/SYSRET `write`/`exit` path.
-- [x] ELF validation, loading, BSS zeroing и execution.
-
-### Process lifecycle syscalls
-
-- [x] Bounded registry, PID allocation, parent/child и orphan reparenting.
-- [x] Register existing Process metadata.
-- [x] `getpid` syscall.
-- [x] `sleep` синхронизирует Process и registry state.
-- [x] `exit` сохраняет status, reparent-ит children и завершает process runner.
-- [x] `wait` проверяет parent, возвращает Busy для live child и reaps exited child.
-- [ ] Blocking wait queue и wake parent при child exit.
-- [ ] Scheduler-backed sleep deadline и automatic resume.
-- [ ] `spawn` ownership: ELF image, Process object, registry slot и rollback при ошибке.
-- [ ] Handle table и `read/open/close/stat/mmap`.
-
-### Isolation и runtime
-
+### Следующий слой
+- [ ] Вызывать `process_table::advance_time` из timer tick.
+- [ ] Process runner должен resume Ready process после sleep/wait wake.
+- [ ] Blocking `wait` syscall должен возвращать status после resumption, не Busy.
+- [ ] IRET fallback для non-SYSRET-safe return frames.
 - [ ] User page fault/invalid opcode завершают process, не kernel.
-- [ ] Negative CI: bad pointer, NX execute, write-to-code, stack guard.
-- [ ] Rust user runtime, app Cargo pipeline и user-space shell.
+- [ ] Spawn ownership: ELF + Process + registry slot + rollback.
+- [ ] Handle table и `read/open/close/stat/mmap`.
+- [ ] Rust runtime и user-space shell.
 
-## M2 IPC, VM и storage
-
-- [ ] Channels, pipes, shared memory/MAP_SHARED, Unix sockets и signals.
-- [ ] Slab, demand paging, file mappings и OOM policy.
-- [ ] VFS, writable FAT32, page cache, permissions/capabilities и settings.
+## M2+
+- [ ] IPC channels/shared memory, VM/VFS, hardware/network/security, graphics/desktop, packages/tooling.
 
 ## Следующий пакет
-
-1. Blocking wait + scheduler-backed sleep/wakeup.
+1. Timer integration + process runner resume.
 2. User fault isolation + negative QEMU tests.
 3. Spawn ownership + handles.
 4. Channels + shared memory.

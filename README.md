@@ -4,16 +4,15 @@
 
 ## Готово
 
-- M0 Kernel Stable и полный QEMU regression suite.
-- Ring 3, real syscalls, ELF loading/execution и process table.
-- Existing Process objects можно регистрировать с parent metadata.
-- `getpid`, `sleep`, `exit`, `wait` синхронизируют Process lifecycle с registry.
-- `wait` возвращает Busy для живого child, exit status после завершения и атомарно reaps запись.
-- Exit reparent-ит детей к PID 0.
+- M0 Kernel Stable, Ring 3, real syscalls, ELF execution и process registry.
+- Process sleep хранит monotonic deadline и автоматически становится Ready при `advance_time`.
+- Blocking wait регистрирует parent waiter; child exit публикует wake event и будит parent.
+- Wake events одноразовые через `take_wake`, без polling состояния.
+- `sleep` syscall теперь возвращает абсолютный deadline и обновляет registry.
 
 ## Текущий этап: M1 Userland
 
-Process lifecycle теперь проходит через syscall dispatcher и registry. Следующий пакет: blocking wait queue и scheduler-backed sleep deadline, затем user fault isolation.
+Готова process-level blocking модель. Следующий пакет связывает monotonic process time с PIT tick и runner resumption, затем fault isolation и spawn ownership.
 
 Подробный статус: [TODO.md](TODO.md).
 

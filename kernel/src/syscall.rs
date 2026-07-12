@@ -1,101 +1,11 @@
 //! Versioned syscall ABI and safe Rust dispatcher.
 
-use crate::{process::{Process, ProcessState}, process_table, serial};
+use crate::{process::Process, process_table, serial};
 
-pub const ABI_VERSION: u64 = 1;
-pub const SYS_WRITE: u64 = 1;
-pub const SYS_EXIT: u64 = 2;
-pub const SYS_SLEEP: u64 = 3;
-pub const SYS_WAIT: u64 = 4;
-pub const SYS_GETPID: u64 = 5;
-const MAX_WRITE: usize = 256;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i64)]
-pub enum Errno {
-    Invalid = 1,
-    BadAddress = 2,
-    TooLarge = 3,
-    NotSupported = 4,
-    NoSuchProcess = 5,
-    NotChild = 6,
-    Busy = 7,
-}
-
-impl Errno {
-    pub const fn encoded(self) -> u64 { (-(self as i64)) as u64 }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SyscallResult {
-    pub value: u64,
-    pub terminated: bool,
-}
-
-impl SyscallResult {
-    const fn ok(value: u64) -> Self { Self { value, terminated: false } }
-    const fn error(error: Errno) -> Self { Self { value: error.encoded(), terminated: false } }
-}
-
-pub fn dispatch(process: &mut Process, number: u64, arguments: [u64; 6]) -> SyscallResult {
-    match number {
-        SYS_WRITE => write(process, arguments[0], arguments[1]),
-        SYS_EXIT => {
-            let code = arguments[0] as i32;
-            process.exit(code);
-            let _ = process_table::exit(process.pid, code);
-            process_table::orphan_children(process.pid);
-            SyscallResult { value: 0, terminated: true }
-        }
-        SYS_SLEEP => {
-            if arguments[0] == 0 {
-                return SyscallResult::error(Errno::Invalid);
-            }
-            process.state = ProcessState::Sleeping;
-            let _ = process_table::set_state(process.pid, ProcessState::Sleeping);
-            SyscallResult::ok(0)
-        }
-        SYS_WAIT => match process_table::wait(process.pid, arguments[0]) {
-            Ok(status) => SyscallResult::ok(status as u32 as u64),
-            Err(error) => SyscallResult::error(table_errno(error)),
-        },
-        SYS_GETPID => SyscallResult::ok(process.pid),
-        _ => SyscallResult::error(Errno::NotSupported),
-    }
-}
-
-fn table_errno(error: process_table::TableError) -> Errno {
-    match error {
-        process_table::TableError::NoSuchProcess => Errno::NoSuchProcess,
-        process_table::TableError::NotChild => Errno::NotChild,
-        process_table::TableError::StillRunning => Errno::Busy,
-        process_table::TableError::Full
-        | process_table::TableError::AlreadyExists => Errno::Invalid,
-    }
-}
-
-fn write(process: &Process, user_address: u64, length: u64) -> SyscallResult {
-    let Ok(length) = usize::try_from(length) else {
-        return SyscallResult::error(Errno::TooLarge);
-    };
-    if length > MAX_WRITE {
-        return SyscallResult::error(Errno::TooLarge);
-    }
-    let mut buffer = [0u8; MAX_WRITE];
-    if process
-        .address_space
-        .copy_from_user(&mut buffer[..length], user_address)
-        .is_err()
-    {
-        return SyscallResult::error(Errno::BadAddress);
-    }
-    serial::info(format_args!("user[{}] write {} bytes", process.pid, length));
-    for chunk in buffer[..length].chunks(32) {
-        if let Ok(text) = core::str::from_utf8(chunk) {
-            serial::info(format_args!("user: {}", text));
-        } else {
-            serial::info(format_args!("user: <binary {} bytes>", chunk.len()));
-        }
-    }
-    SyscallResult::ok(length as u64)
-}
+pub const ABI_VERSION:u64=1;pub const SYS_WRITE:u64=1;pub const SYS_EXIT:u64=2;pub const SYS_SLEEP:u64=3;pub const SYS_WAIT:u64=4;pub const SYS_GETPID:u64=5;const MAX_WRITE:usize=256;
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]#[repr(i64)]pub enum Errno{Invalid=1,BadAddress=2,TooLarge=3,NotSupported=4,NoSuchProcess=5,NotChild=6,Busy=7}
+impl Errno{pub const fn encoded(self)->u64{(-(self as i64))as u64}}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]pub struct SyscallResult{pub value:u64,pub terminated:bool}impl SyscallResult{const fn ok(value:u64)->Self{Self{value,terminated:false}}const fn error(error:Errno)->Self{Self{value:error.encoded(),terminated:false}}}
+pub fn dispatch(process:&mut Process,number:u64,args:[u64;6])->SyscallResult{match number{SYS_WRITE=>write(process,args[0],args[1]),SYS_EXIT=>{let code=args[0]as i32;process.exit(code);let _=process_table::exit(process.pid,code);process_table::orphan_children(process.pid);SyscallResult{value:0,terminated:true}},SYS_SLEEP=>{let now=args[1];let Some(deadline)=now.checked_add(args[0])else{return SyscallResult::error(Errno::Invalid)};if process_table::sleep_until(process.pid,now,deadline).is_err(){return SyscallResult::error(Errno::Invalid)}process.state=crate::process::ProcessState::Sleeping;SyscallResult::ok(deadline)},SYS_WAIT=>match process_table::wait_blocking(process.pid,args[0]){Ok(Some(status))=>SyscallResult::ok(status as u32 as u64),Ok(None)=>{process.state=crate::process::ProcessState::Sleeping;SyscallResult::error(Errno::Busy)},Err(error)=>SyscallResult::error(table_errno(error))},SYS_GETPID=>SyscallResult::ok(process.pid),_=>SyscallResult::error(Errno::NotSupported)}}
+fn table_errno(error:process_table::TableError)->Errno{match error{process_table::TableError::NoSuchProcess=>Errno::NoSuchProcess,process_table::TableError::NotChild=>Errno::NotChild,process_table::TableError::StillRunning=>Errno::Busy,process_table::TableError::Full|process_table::TableError::AlreadyExists|process_table::TableError::InvalidDeadline=>Errno::Invalid}}
+fn write(process:&Process,address:u64,length:u64)->SyscallResult{let Ok(length)=usize::try_from(length)else{return SyscallResult::error(Errno::TooLarge)};if length>MAX_WRITE{return SyscallResult::error(Errno::TooLarge)}let mut buffer=[0u8;MAX_WRITE];if process.address_space.copy_from_user(&mut buffer[..length],address).is_err(){return SyscallResult::error(Errno::BadAddress)}serial::info(format_args!("user[{}] write {} bytes",process.pid,length));for chunk in buffer[..length].chunks(32){if let Ok(text)=core::str::from_utf8(chunk){serial::info(format_args!("user: {}",text))}else{serial::info(format_args!("user: <binary {} bytes>",chunk.len()))}}SyscallResult::ok(length as u64)}
