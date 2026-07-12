@@ -5,16 +5,16 @@
 ## Готово
 
 - M0 Kernel Stable: scheduler, memory, synchronization, diagnostics и QEMU regression suite.
-- Ring 3 descriptors, TSS `RSP0`, per-process PML4, USER/NX W^X mappings и validated user copies.
-- Реальный `iretq` Ring 3 round-trip и controlled DPL3 trap.
+- Ring 3, per-process address spaces, W^X, safe user copies и process-owned kernel entry stacks.
 - Versioned syscall ABI и dispatcher для `write`, `exit`, `sleep`.
-- Каждый Process теперь владеет отдельным 32 KiB kernel entry stack.
-- Syscall return frames классифицируются: safe `sysret`, audited `iret` fallback или reject.
-- CPUID capability check и RFLAGS sanitization готовы до включения MSR entry.
+- EFER.SCE, STAR, LSTAR и FMASK настраиваются и проверяются readback.
+- Формализован `SyscallFrame` с шестью аргументами, user RIP/RFLAGS/RSP и result.
+- Active process устанавливает собственный kernel entry stack до будущего assembly entry.
+- LSTAR пока fail-closed: ранний `syscall` останавливает CPU, а не выполняет Rust на user stack.
 
 ## Текущий этап: M1 Userland
 
-Сначала закрепили опасные инварианты entry path: stack ownership, canonical RIP/RSP, forbidden RFLAGS и безопасный выбор return instruction. Следующий PR уже может включать EFER/STAR/LSTAR/FMASK и assembly entry, не смешивая это с непроверенной логикой.
+MSR contract и register context готовы. Следующий пакет заменит fail-closed LSTAR stub полноценным assembly trampoline: сохранить user state, перейти на process stack, вызвать dispatcher и вернуть через проверенный SYSRET/IRET path.
 
 Подробный статус: [TODO.md](TODO.md).
 
