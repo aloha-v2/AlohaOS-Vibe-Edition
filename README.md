@@ -2,19 +2,22 @@
 
 Экспериментальная x86_64 ОС на Rust: собственный AlohaBoot UEFI bootloader и `no_std` kernel.
 
-## Работает сейчас
+## Готово
 
-- M0 Kernel Stable: scheduler, synchronization, frame reclamation, panic backtrace и QEMU smoke tests.
-- Ring 3 code/data descriptors и отдельный 32 KiB TSS `RSP0` stack.
-- Per-process PML4 roots с выделенным user region и USER/NX page mappings.
-- UEFI loader, framebuffer console, PS/2 keyboard, VirtIO Block и read-only FAT32.
-- COM1 logging, shell и пять CI/QEMU jobs.
+- **M0 Kernel Stable:** полный context switch, scheduler, synchronization, frame reclamation, panic backtrace и пять CI/QEMU checks.
+- Ring 3 code/data descriptors и отдельный TSS `RSP0` stack.
+- Per-process PML4 roots, USER/NX W^X mappings и автоматический возврат owned frames.
+- Interrupt-safe CR3 activation guard с обязательным возвратом в kernel address space.
+- Минимальная Process model: PID, lifecycle, entry, user stack и exit code.
+- Полная проверка user ranges: canonical addresses, overflow, mappings, USER и writable permissions.
+- `copy_from_user`/`copy_to_user` работают через page translation и поддерживают переход через границу страницы.
+- UEFI loader, framebuffer console, PS/2 keyboard, VirtIO Block, read-only FAT32, COM1 logger и shell.
 
 ## Текущий этап: M1 Userland
 
-Готовы Ring 3 descriptors, `RSP0` и базовый `AddressSpace`: новый PML4 наследует kernel mappings, но получает отдельный user PML4 slot. User code pages read-only executable, data/stack pages writable NX; owned page-table/data frames освобождаются вместе с address space.
+За один пакет закрыты три основания M1: безопасное переключение CR3, Process ownership/lifecycle и validated user-memory copy. Следующий пакет: минимальный user image, `iretq` entry и контролируемый trap обратно в kernel, затем syscall MSRs.
 
-Следующее: переключение CR3 для процесса, вход в Ring 3 через `iretq`, затем минимальный безопасный syscall path. Desktop всё ещё ждёт, и правильно делает.
+Desktop пока не трогаем. Окна без изоляции процессов выглядят красиво ровно до первого page fault.
 
 Подробный статус: [TODO.md](TODO.md).
 
