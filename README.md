@@ -5,14 +5,14 @@
 ## Готово
 
 - M0 Kernel Stable, Ring 3, real syscalls, ELF execution и process registry.
-- Process sleep хранит monotonic deadline и автоматически становится Ready при `advance_time`.
-- Blocking wait регистрирует parent waiter; child exit публикует wake event и будит parent.
-- Wake events одноразовые через `take_wake`, без polling состояния.
-- `sleep` syscall теперь возвращает абсолютный deadline и обновляет registry.
+- PIT timer напрямую двигает process sleep deadlines.
+- Expired sleepers получают Ready state и one-shot wake event.
+- Process runner reconciliation переносит registry wake в owned Process state.
+- Blocking wait после child exit возобновляет parent и завершает reap со status.
 
 ## Текущий этап: M1 Userland
 
-Готова process-level blocking модель. Следующий пакет связывает monotonic process time с PIT tick и runner resumption, затем fault isolation и spawn ownership.
+Sleep/wait wake path теперь связан с реальным PIT tick и runner state. Следующий пакет: user fault isolation с возвратом в runner, затем spawn ownership и handles.
 
 Подробный статус: [TODO.md](TODO.md).
 
