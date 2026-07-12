@@ -1,15 +1,18 @@
-//! Feature-gated M0 smoke checks executed by headless QEMU CI.
+//! Feature-gated smoke checks executed by headless QEMU CI.
 
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::arch::asm;
 
-use crate::{heap, keyboard, memory, serial};
+use crate::{gdt, heap, keyboard, memory, serial};
 
 #[cfg(feature = "m0-smoke")]
 pub fn run_nonfatal() {
     heap_smoke();
     frame_reclamation_smoke();
     keyboard_smoke();
+    user_descriptor_smoke();
+    // Keep the established M0 marker stable: CI and external smoke runners use
+    // it as a compatibility contract. M1 checks emit their own marker below.
     serial::info(format_args!("m0-smoke: heap keyboard memory passed"));
 }
 
@@ -57,6 +60,16 @@ fn keyboard_smoke() {
     assert!(keyboard::decode(0xe0).is_none());
     assert!(matches!(keyboard::decode(0x48), Some(keyboard::Key::Up)));
     serial::info(format_args!("m0-smoke: keyboard decode passed"));
+}
+
+#[cfg(feature = "m0-smoke")]
+fn user_descriptor_smoke() {
+    assert_eq!(gdt::kernel_data_selector(), 0x10);
+    assert_eq!(gdt::user_data_selector(), 0x1b);
+    assert_eq!(gdt::user_code_selector(), 0x23);
+    assert_ne!(gdt::rsp0(), 0);
+    assert_eq!(gdt::rsp0() & 0xf, 0);
+    serial::info(format_args!("m1-smoke: ring3 descriptors and rsp0 passed"));
 }
 
 #[cfg(feature = "exception-smoke")]
