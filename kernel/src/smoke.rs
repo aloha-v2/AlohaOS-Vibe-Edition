@@ -3,7 +3,7 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::arch::asm;
 
-use crate::{gdt, heap, keyboard, memory, serial};
+use crate::{address_space, gdt, heap, keyboard, memory, serial};
 
 #[cfg(feature = "m0-smoke")]
 pub fn run_nonfatal() {
@@ -11,8 +11,7 @@ pub fn run_nonfatal() {
     frame_reclamation_smoke();
     keyboard_smoke();
     user_descriptor_smoke();
-    // Keep the established M0 marker stable: CI and external smoke runners use
-    // it as a compatibility contract. M1 checks emit their own marker below.
+    user_address_space_smoke();
     serial::info(format_args!("m0-smoke: heap keyboard memory passed"));
 }
 
@@ -70,6 +69,34 @@ fn user_descriptor_smoke() {
     assert_ne!(gdt::rsp0(), 0);
     assert_eq!(gdt::rsp0() & 0xf, 0);
     serial::info(format_args!("m1-smoke: ring3 descriptors and rsp0 passed"));
+}
+
+#[cfg(feature = "m0-smoke")]
+fn user_address_space_smoke() {
+    let before = memory::stats().allocated;
+    let mut space = address_space::AddressSpace::new().expect("user PML4 allocation failed");
+    let code_address = address_space::USER_REGION_START;
+    let data_address = code_address + memory::FRAME_SIZE;
+    let code_frame = space
+        .map_zeroed_user_page(code_address, false, true)
+        .expect("user code mapping failed");
+    let data_frame = space
+        .map_zeroed_user_page(data_address, true, false)
+        .expect("user data mapping failed");
+
+    let (translated_code, code_flags) = space.translate(code_address).unwrap();
+    let (translated_data, data_flags) = space.translate(data_address).unwrap();
+    assert_eq!(translated_code, code_frame);
+    assert_eq!(translated_data, data_frame);
+    assert_ne!(code_flags & address_space::user_flag(), 0);
+    assert_eq!(code_flags & address_space::writable_flag(), 0);
+    assert_eq!(code_flags & address_space::no_execute_flag(), 0);
+    assert_ne!(data_flags & address_space::writable_flag(), 0);
+    assert_ne!(data_flags & address_space::no_execute_flag(), 0);
+    assert_ne!(space.root_frame(), 0);
+    drop(space);
+    assert_eq!(memory::stats().allocated, before);
+    serial::info(format_args!("m1-smoke: user PML4 USER NX mappings passed"));
 }
 
 #[cfg(feature = "exception-smoke")]
