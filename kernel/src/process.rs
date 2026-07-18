@@ -110,8 +110,8 @@ impl Process {
     }
 
     pub fn mark_running(&mut self) { self.state = ProcessState::Running; }
-    pub fn exit(&mut self, code: i32) { self.exit_code = code; self.state = ProcessState::Exited; self.suspended = None; }
-    pub fn fault(&mut self) { self.state = ProcessState::Faulted; self.suspended = None; }
+    pub fn exit(&mut self, code: i32) { self.exit_code = code; self.state = ProcessState::Exited; }
+    pub fn fault(&mut self) { self.state = ProcessState::Faulted; }
 }
 
 impl Drop for Process { fn drop(&mut self) { unsafe { let _ = memory::deallocate_contiguous(self.kernel_stack_start, KERNEL_STACK_PAGES); } } }
