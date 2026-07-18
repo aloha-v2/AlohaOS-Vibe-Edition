@@ -13,8 +13,6 @@ struct Volume {
     data_start: u32,
 }
 
-/// Location of a file within the mounted volume: its first cluster and byte
-/// size. This is all a reader needs to walk the cluster chain and stop at EOF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FileLocation {
     pub first_cluster: u32,
@@ -70,10 +68,6 @@ fn mounted_volume() -> Option<Volume> {
     *VOLUME.lock()
 }
 
-/// Resolve an 8.3 `name` in the root directory to its [`FileLocation`].
-///
-/// Returns `None` when the volume is unmounted, the name is not a valid 8.3
-/// name, no matching entry exists, or the entry is a directory.
 pub fn lookup(name: &[u8]) -> Option<FileLocation> {
     let volume = mounted_volume()?;
     let target = make_short_name(name)?;
@@ -94,120 +88,85 @@ pub fn lookup(name: &[u8]) -> Option<FileLocation> {
     found
 }
 
-/// Read up to `output.len()` bytes from `location`, starting at byte `offset`.
-///
-/// Returns the number of bytes copied. Returns `0` at or past EOF, on an empty
-/// buffer, or if a disk read fails partway (already-copied bytes are kept).
+/// Read bytes from a file at `offset`, never touching the FAT after the
+/// requested range has been completely satisfied.
 pub fn read_at(location: &FileLocation, offset: u32, output: &mut [u8]) -> usize {
     let Some(volume) = mounted_volume() else {
         return 0;
     };
-    if output.is_empty() || offset >= location.size {
+    if output.is_empty() || offset >= location.size || location.first_cluster < 2 {
         return 0;
     }
-    let cluster_bytes = volume.sectors_per_cluster * 512;
-    // Walk the cluster chain to the cluster that holds `offset`.
+
+    let cluster_bytes = volume.sectors_per_cluster.saturating_mul(512);
+    if cluster_bytes == 0 {
+        return 0;
+    }
     let mut cluster = location.first_cluster;
-    let mut clusters_to_skip = offset / cluster_bytes;
-    while clusters_to_skip > 0 {
-        match next_cluster(volume, cluster) {
-            Some(next) if (2..0x0fff_fff8).contains(&next) => cluster = next,
-            _ => return 0,
+    let mut skip = offset / cluster_bytes;
+    while skip != 0 {
+        let Some(next) = next_cluster(volume, cluster) else {
+            return 0;
+        };
+        if !(2..0x0fff_fff8).contains(&next) {
+            return 0;
         }
-        clusters_to_skip -= 1;
+        cluster = next;
+        skip -= 1;
     }
 
     let want = output.len().min((location.size - offset) as usize);
-    let mut within = offset % cluster_bytes; // byte cursor inside the current cluster
+    let mut within = offset % cluster_bytes;
     let mut written = 0usize;
     let mut sector = [0u8; 512];
+
     while written < want && (2..0x0fff_fff8).contains(&cluster) {
-        let first = cluster_sector(volume, cluster);
-        for sector_index in 0..volume.sectors_per_cluster {
-            if written >= want {
+        let first_sector = cluster_sector(volume, cluster);
+        let first_index = within / 512;
+        let first_byte = within % 512;
+        for sector_index in first_index..volume.sectors_per_cluster {
+            if written == want {
                 break;
             }
-            if !virtio_blk::read_sector((first + sector_index) as u64, &mut sector) {
+            if !virtio_blk::read_sector((first_sector + sector_index) as u64, &mut sector) {
                 return written;
             }
-            let sector_base = sector_index * 512;
-            for (byte_index, &byte) in sector.iter().enumerate() {
-                let position = sector_base + byte_index as u32;
-                if position < within {
-                    continue;
-                }
-                if written >= want {
-                    break;
-                }
-                output[written] = byte;
-                written += 1;
-            }
+            let start = if sector_index == first_index { first_byte as usize } else { 0 };
+            let count = (want - written).min(512 - start);
+            output[written..written + count].copy_from_slice(&sector[start..start + count]);
+            written += count;
+        }
+        if written == want {
+            break;
         }
         within = 0;
-        match next_cluster(volume, cluster) {
-            Some(next) => cluster = next,
-            None => break,
-        }
+        let Some(next) = next_cluster(volume, cluster) else {
+            break;
+        };
+        cluster = next;
     }
     written
 }
 
 pub fn list_root() {
-    let Some(volume) = mounted_volume() else {
-        framebuffer::write_line("FAT32 NOT MOUNTED");
-        return;
-    };
-    walk_directory(volume, |entry| {
-        write_short_name(entry);
-        if entry[11] & 0x10 != 0 {
-            framebuffer::write_text("/");
-        }
-        framebuffer::write_byte(b'\n');
-        false
-    });
+    let Some(volume) = mounted_volume() else { framebuffer::write_line("FAT32 NOT MOUNTED"); return; };
+    walk_directory(volume, |entry| { write_short_name(entry); if entry[11] & 0x10 != 0 { framebuffer::write_text("/"); } framebuffer::write_byte(b'\n'); false });
 }
 
 pub fn cat(name: &[u8]) {
-    let Some(volume) = mounted_volume() else {
-        framebuffer::write_line("FAT32 NOT MOUNTED");
-        return;
-    };
-    let Some(location) = lookup(name) else {
-        framebuffer::write_line("FILE NOT FOUND");
-        return;
-    };
-
+    let Some(volume) = mounted_volume() else { framebuffer::write_line("FAT32 NOT MOUNTED"); return; };
+    let Some(location) = lookup(name) else { framebuffer::write_line("FILE NOT FOUND"); return; };
     let mut cluster = location.first_cluster;
     let mut remaining = location.size;
     let mut sector = [0u8; 512];
     while cluster >= 2 && cluster < 0x0fff_fff8 && remaining != 0 {
         let first = cluster_sector(volume, cluster);
         for offset in 0..volume.sectors_per_cluster {
-            if !virtio_blk::read_sector((first + offset) as u64, &mut sector) {
-                framebuffer::write_line("DISK READ ERROR");
-                return;
-            }
+            if !virtio_blk::read_sector((first + offset) as u64, &mut sector) { framebuffer::write_line("DISK READ ERROR"); return; }
             let count = remaining.min(512) as usize;
-            for &byte in &sector[..count] {
-                if byte == b'\n'
-                    || byte == b'\r'
-                    || byte == b'\t'
-                    || byte.is_ascii_graphic()
-                    || byte == b' '
-                {
-                    framebuffer::write_byte(if byte == b'\r' {
-                        b'\n'
-                    } else if byte == b'\t' {
-                        b' '
-                    } else {
-                        byte
-                    });
-                }
-            }
+            for &byte in &sector[..count] { if byte == b'\n' || byte == b'\r' || byte == b'\t' || byte.is_ascii_graphic() || byte == b' ' { framebuffer::write_byte(if byte == b'\r' { b'\n' } else if byte == b'\t' { b' ' } else { byte }); } }
             remaining -= count as u32;
-            if remaining == 0 {
-                break;
-            }
+            if remaining == 0 { break; }
         }
         cluster = next_cluster(volume, cluster).unwrap_or(0x0fff_ffff);
     }
@@ -220,28 +179,16 @@ fn walk_directory(volume: Volume, mut visitor: impl FnMut(&[u8; 32]) -> bool) {
     for _ in 0..128 {
         let first = cluster_sector(volume, cluster);
         for offset in 0..volume.sectors_per_cluster {
-            if !virtio_blk::read_sector((first + offset) as u64, &mut sector) {
-                return;
-            }
+            if !virtio_blk::read_sector((first + offset) as u64, &mut sector) { return; }
             for raw in sector.chunks_exact(32) {
-                if raw[0] == 0 {
-                    return;
-                }
-                if raw[0] == 0xe5 || raw[11] == 0x0f || raw[11] & 0x08 != 0 {
-                    continue;
-                }
+                if raw[0] == 0 { return; }
+                if raw[0] == 0xe5 || raw[11] == 0x0f || raw[11] & 0x08 != 0 { continue; }
                 let entry: &[u8; 32] = raw.try_into().unwrap();
-                if visitor(entry) {
-                    return;
-                }
+                if visitor(entry) { return; }
             }
         }
-        let Some(next) = next_cluster(volume, cluster) else {
-            return;
-        };
-        if next >= 0x0fff_fff8 {
-            return;
-        }
+        let Some(next) = next_cluster(volume, cluster) else { return; };
+        if next >= 0x0fff_fff8 { return; }
         cluster = next;
     }
 }
@@ -249,75 +196,19 @@ fn walk_directory(volume: Volume, mut visitor: impl FnMut(&[u8; 32]) -> bool) {
 fn next_cluster(volume: Volume, cluster: u32) -> Option<u32> {
     let offset = cluster * 4;
     let mut sector = [0u8; 512];
-    virtio_blk::read_sector(
-        (volume.fat_start + offset / 512) as u64,
-        &mut sector,
-    )
-    .then(|| le32(&sector, (offset % 512) as usize) & 0x0fff_ffff)
+    virtio_blk::read_sector((volume.fat_start + offset / 512) as u64, &mut sector)
+        .then(|| le32(&sector, (offset % 512) as usize) & 0x0fff_ffff)
 }
 
-fn cluster_sector(volume: Volume, cluster: u32) -> u32 {
-    volume.data_start + (cluster - 2) * volume.sectors_per_cluster
-}
+fn cluster_sector(volume: Volume, cluster: u32) -> u32 { volume.data_start + (cluster - 2) * volume.sectors_per_cluster }
 
-fn write_short_name(entry: &[u8; 32]) {
-    for &byte in &entry[..8] {
-        if byte != b' ' {
-            framebuffer::write_byte(byte);
-        }
-    }
-    if entry[8] != b' ' {
-        framebuffer::write_byte(b'.');
-        for &byte in &entry[8..11] {
-            if byte != b' ' {
-                framebuffer::write_byte(byte);
-            }
-        }
-    }
-}
+fn write_short_name(entry: &[u8; 32]) { for &byte in &entry[..8] { if byte != b' ' { framebuffer::write_byte(byte); } } if entry[8] != b' ' { framebuffer::write_byte(b'.'); for &byte in &entry[8..11] { if byte != b' ' { framebuffer::write_byte(byte); } } } }
 
 fn make_short_name(name: &[u8]) -> Option<[u8; 11]> {
-    let mut output = [b' '; 11];
-    let mut base = 0usize;
-    let mut ext = 8usize;
-    let mut dotted = false;
-    for &byte in name {
-        if byte == b'.' {
-            if dotted {
-                return None;
-            }
-            dotted = true;
-            continue;
-        }
-        if !byte.is_ascii_alphanumeric() && byte != b'_' {
-            return None;
-        }
-        if dotted {
-            if ext == 11 {
-                return None;
-            }
-            output[ext] = byte.to_ascii_uppercase();
-            ext += 1;
-        } else {
-            if base == 8 {
-                return None;
-            }
-            output[base] = byte.to_ascii_uppercase();
-            base += 1;
-        }
-    }
+    let mut output = [b' '; 11]; let mut base = 0usize; let mut ext = 8usize; let mut dotted = false;
+    for &byte in name { if byte == b'.' { if dotted { return None; } dotted = true; continue; } if !byte.is_ascii_alphanumeric() && byte != b'_' { return None; } if dotted { if ext == 11 { return None; } output[ext] = byte.to_ascii_uppercase(); ext += 1; } else { if base == 8 { return None; } output[base] = byte.to_ascii_uppercase(); base += 1; } }
     (base > 0).then_some(output)
 }
 
-fn le16(data: &[u8], offset: usize) -> u16 {
-    u16::from_le_bytes([data[offset], data[offset + 1]])
-}
-
-fn le32(data: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes([
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-    ])
-}
+fn le16(data: &[u8], offset: usize) -> u16 { u16::from_le_bytes([data[offset], data[offset + 1]]) }
+fn le32(data: &[u8], offset: usize) -> u32 { u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]) }
