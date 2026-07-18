@@ -5,7 +5,7 @@ use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
 use crate::{gdt,process::Process,process_table,syscall::{self,SyscallAction},syscall_entry::{ReturnPath,SyscallFrame,UserReturnFrame}};
 
-const IA32_EFER:u32=0xc000_0080;const IA32_STAR:u32=0xc000_0081;const IA32_LSTAR:u32=0xc000_0082;const IA32_FMASK:u32=1<<8|1<<9|1<<10|1<<18;const EFER_SCE:u64=1;const SYSCALL_MASK:u64=(1<<8)|(1<<9)|(1<<10)|(1<<18);
+const IA32_EFER:u32=0xc000_0080;const IA32_STAR:u32=0xc000_0081;const IA32_LSTAR:u32=0xc000_0082;const IA32_FMASK:u32=0xc000_0084;const EFER_SCE:u64=1;const SYSCALL_MASK:u64=(1<<8)|(1<<9)|(1<<10)|(1<<18);
 const DISPATCH_RETURN:u8=0;const DISPATCH_TERMINATED:u8=1;const DISPATCH_IRET:u8=2;const DISPATCH_SUSPENDED:u8=3;
 static INITIALIZED:AtomicBool=AtomicBool::new(false);
 unsafe extern "C"{fn aloha_syscall_entry();fn aloha_return_process_runner(return_rsp:u64)->!;fn aloha_resume_user(frame:*const SyscallFrame,path:u64,code_selector:u64,data_selector:u64);static mut ALOHA_SYSCALL_KERNEL_STACK:u64;static mut ALOHA_SYSCALL_KERNEL_RETURN_RSP:u64;static mut ALOHA_SYSCALL_PROCESS:u64;static mut ALOHA_USER_RETURN_RSP:u64;}
@@ -63,7 +63,7 @@ aloha_syscall_entry:
  je .Lsysret
  cmp al,2
  je .Liret
- mov rdi,[rip+ALOHA_SYSCALL_KERNEL_RETURN_RSP]
+ mov rdi,[rip+ALOHA_SYSCALL_KERNEL_RETURN_RSP
  jmp aloha_return_process_runner
 .Lsysret:
  mov rax,[rsp+80]
