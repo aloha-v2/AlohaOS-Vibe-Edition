@@ -1,0 +1,44 @@
+name: File handle table smoke
+
+on:
+  push:
+    branches: [main, "brain/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  handle-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build handle table smoke kernel and FAT32 disk
+        run: |
+          make esp PROFILE=release KERNEL_FEATURES=handle-smoke
+          mkdir -p disk
+          python3 scripts/create-fat32.py disk/aloha-fat32.img
+          test -s disk/aloha-fat32.img
+      - name: Verify open/read/stat/close over the FAT32 volume
+        shell: bash
+        run: |
+          OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
+          set +e
+          timeout 10s qemu-system-x86_64 -machine q35 -cpu max -m 256M \
+            -drive "if=pflash,format=raw,readonly=on,file=$OVMF" \
+            -drive "format=raw,file=fat:rw:esp" \
+            -drive "if=none,id=aloha-disk,format=raw,file=disk/aloha-fat32.img" \
+            -device "virtio-blk-pci,drive=aloha-disk,disable-modern=on" \
+            -display none -monitor none -serial file:handle.log -net none -no-reboot
+          status=$?
+          set -e
+          cat handle.log
+          test "$status" -eq 124
+          grep -q "storage: virtio_blk=true, fat32=true" handle.log
+          grep -q "handle-smoke: open read stat close eof passed" handle.log
+          ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' handle.log
