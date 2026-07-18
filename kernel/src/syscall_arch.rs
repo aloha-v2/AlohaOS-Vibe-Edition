@@ -57,7 +57,7 @@ aloha_syscall_entry:
  je .Lsysret
  cmp al,2
  je .Liret
- mov rdi,[rip+ALOHA_SYSCALL_KERNEL_RETURN_RSP]
+ mov rdi,[rip+ALOHA_SYSCALL_KERNEL_RETURN_RSP
  jmp aloha_return_process_runner
 .Lsysret:
  mov rax,[rsp+80]
@@ -97,8 +97,8 @@ aloha_resume_user:
  push 0x1b
  push r10
  push r9
- push r8
  push 0x23
+ push r8
  iretq
 .global aloha_return_process_runner
 .type aloha_return_process_runner,@function
