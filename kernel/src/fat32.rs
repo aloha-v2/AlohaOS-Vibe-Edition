@@ -1,4 +1,4 @@
-//! Small read-only FAT32 filesystem for the AlohaOS shell.
+//! Small read-only FAT32 filesystem for the AlohaOS shell and file syscalls.
 
 use crate::{framebuffer, sync::IrqSpinLock, virtio_blk};
 
@@ -11,6 +11,18 @@ struct Volume {
     root_cluster: u32,
     fat_start: u32,
     data_start: u32,
+}
+
+/// Location of a file within the mounted volume: its first cluster and byte
+/// size. This is all a reader needs to walk the cluster chain and stop at EOF.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileLocation {
+    pub first_cluster: u32,
+    pub size: u32,
+}
+
+impl FileLocation {
+    pub const EMPTY: Self = Self { first_cluster: 0, size: 0 };
 }
 
 static VOLUME: IrqSpinLock<Option<Volume>> = IrqSpinLock::new(None);
@@ -58,6 +70,88 @@ fn mounted_volume() -> Option<Volume> {
     *VOLUME.lock()
 }
 
+/// Resolve an 8.3 `name` in the root directory to its [`FileLocation`].
+///
+/// Returns `None` when the volume is unmounted, the name is not a valid 8.3
+/// name, no matching entry exists, or the entry is a directory.
+pub fn lookup(name: &[u8]) -> Option<FileLocation> {
+    let volume = mounted_volume()?;
+    let target = make_short_name(name)?;
+    let mut found = None;
+    walk_directory(volume, |entry| {
+        if entry[..11] == target && entry[11] & 0x10 == 0 {
+            let high = le16(entry, 20) as u32;
+            let low = le16(entry, 26) as u32;
+            found = Some(FileLocation {
+                first_cluster: (high << 16) | low,
+                size: le32(entry, 28),
+            });
+            true
+        } else {
+            false
+        }
+    });
+    found
+}
+
+/// Read up to `output.len()` bytes from `location`, starting at byte `offset`.
+///
+/// Returns the number of bytes copied. Returns `0` at or past EOF, on an empty
+/// buffer, or if a disk read fails partway (already-copied bytes are kept).
+pub fn read_at(location: &FileLocation, offset: u32, output: &mut [u8]) -> usize {
+    let Some(volume) = mounted_volume() else {
+        return 0;
+    };
+    if output.is_empty() || offset >= location.size {
+        return 0;
+    }
+    let cluster_bytes = volume.sectors_per_cluster * 512;
+    // Walk the cluster chain to the cluster that holds `offset`.
+    let mut cluster = location.first_cluster;
+    let mut clusters_to_skip = offset / cluster_bytes;
+    while clusters_to_skip > 0 {
+        match next_cluster(volume, cluster) {
+            Some(next) if (2..0x0fff_fff8).contains(&next) => cluster = next,
+            _ => return 0,
+        }
+        clusters_to_skip -= 1;
+    }
+
+    let want = output.len().min((location.size - offset) as usize);
+    let mut within = offset % cluster_bytes; // byte cursor inside the current cluster
+    let mut written = 0usize;
+    let mut sector = [0u8; 512];
+    while written < want && (2..0x0fff_fff8).contains(&cluster) {
+        let first = cluster_sector(volume, cluster);
+        for sector_index in 0..volume.sectors_per_cluster {
+            if written >= want {
+                break;
+            }
+            if !virtio_blk::read_sector((first + sector_index) as u64, &mut sector) {
+                return written;
+            }
+            let sector_base = sector_index * 512;
+            for (byte_index, &byte) in sector.iter().enumerate() {
+                let position = sector_base + byte_index as u32;
+                if position < within {
+                    continue;
+                }
+                if written >= want {
+                    break;
+                }
+                output[written] = byte;
+                written += 1;
+            }
+        }
+        within = 0;
+        match next_cluster(volume, cluster) {
+            Some(next) => cluster = next,
+            None => break,
+        }
+    }
+    written
+}
+
 pub fn list_root() {
     let Some(volume) = mounted_volume() else {
         framebuffer::write_line("FAT32 NOT MOUNTED");
@@ -78,27 +172,13 @@ pub fn cat(name: &[u8]) {
         framebuffer::write_line("FAT32 NOT MOUNTED");
         return;
     };
-    let Some(target) = make_short_name(name) else {
-        framebuffer::write_line("USE 8.3 FILE NAME");
-        return;
-    };
-
-    let mut found = None;
-    walk_directory(volume, |entry| {
-        if entry[..11] == target {
-            let high = le16(entry, 20) as u32;
-            let low = le16(entry, 26) as u32;
-            found = Some(((high << 16) | low, le32(entry, 28)));
-            true
-        } else {
-            false
-        }
-    });
-
-    let Some((mut cluster, mut remaining)) = found else {
+    let Some(location) = lookup(name) else {
         framebuffer::write_line("FILE NOT FOUND");
         return;
     };
+
+    let mut cluster = location.first_cluster;
+    let mut remaining = location.size;
     let mut sector = [0u8; 512];
     while cluster >= 2 && cluster < 0x0fff_fff8 && remaining != 0 {
         let first = cluster_sector(volume, cluster);
