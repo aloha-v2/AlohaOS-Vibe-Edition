@@ -16,15 +16,15 @@
 - [x] Suspended syscall frame resume для sleep/wait с результатом в RAX.
 - [x] IRET fallback для valid non-SYSRET frames.
 - [x] Spawn ownership: ELF + Process + registry + rollback (+ rollback smoke в CI).
+- [x] Per-process handle table и file syscalls `open/read/close/stat` поверх read-only FAT32 (+ handle smoke в CI).
 
 ### Следующий слой
-- [ ] Handle table и `read/open/close/stat/mmap`.
+- [ ] `mmap` для user-space.
 - [ ] Rust runtime и user-space shell.
 
 ## M2+
 - [ ] IPC/shared memory, VM/VFS, networking/security, graphics/desktop, packages/tooling.
 
 ## Следующий пакет
-1. Handle table + read/open/close/stat.
-2. mmap + Rust user runtime.
-3. User-space shell поверх spawn/handle table.
+1. `mmap` + Rust user runtime.
+2. User-space shell поверх spawn + handle table.
