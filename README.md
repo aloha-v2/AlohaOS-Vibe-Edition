@@ -9,11 +9,13 @@
 - W^X реально проверяется: запись в executable read-only code page завершает только Process.
 - Unmapped stack guard реально проверяется user write fault.
 - Bad syscall pointer возвращает EFAULT, user process продолжает работу и cleanly exits.
-- Negative protection suite запускается отдельной CI matrix.
+- Sleep/wait сохраняют syscall frame и возобновляются с результатом в RAX.
+- Валидные non-SYSRET frames возвращаются через sanitised `iretq` fallback.
+- Protection и suspended-resume suites запускаются отдельными CI matrix.
 
 ## Текущий этап: M1 Userland
 
-Базовая memory protection и fault isolation покрыты end-to-end. Следующий пакет: suspended syscall resume для sleep/wait, затем spawn ownership/rollback и handle table.
+Syscall suspension/resume и оба безопасных пути возврата покрыты end-to-end. Следующий пакет: spawn ownership/rollback, затем handle table и базовые file syscalls.
 
 Подробный статус: [TODO.md](TODO.md).
 
