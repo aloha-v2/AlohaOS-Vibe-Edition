@@ -1,15 +1,12 @@
 //! x86_64 SYSCALL entry, suspension and dual SYSRET/IRET return paths.
-
 use core::arch::{asm, global_asm};
 use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
 use crate::{gdt,process::Process,process_table,syscall::{self,SyscallAction},syscall_entry::{ReturnPath,SyscallFrame,UserReturnFrame}};
-
 const IA32_EFER:u32=0xc000_0080;const IA32_STAR:u32=0xc000_0081;const IA32_LSTAR:u32=0xc000_0082;const IA32_FMASK:u32=0xc000_0084;const EFER_SCE:u64=1;const SYSCALL_MASK:u64=(1<<8)|(1<<9)|(1<<10)|(1<<18);
 const DISPATCH_RETURN:u8=0;const DISPATCH_TERMINATED:u8=1;const DISPATCH_IRET:u8=2;const DISPATCH_SUSPENDED:u8=3;
 static INITIALIZED:AtomicBool=AtomicBool::new(false);
 unsafe extern "C"{fn aloha_syscall_entry();fn aloha_return_process_runner(return_rsp:u64)->!;fn aloha_resume_user(frame:*const SyscallFrame,path:u64,code_selector:u64,data_selector:u64);static mut ALOHA_SYSCALL_KERNEL_STACK:u64;static mut ALOHA_SYSCALL_KERNEL_RETURN_RSP:u64;static mut ALOHA_SYSCALL_PROCESS:u64;static mut ALOHA_USER_RETURN_RSP:u64;}
-
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]pub enum DispatchOutcome{Return,Terminate,Suspend}
 pub fn init()->bool{if !crate::syscall_entry::cpu_supports_syscall(){return false}if INITIALIZED.swap(true,Ordering::AcqRel){return true}let star=(0x10u64<<48)|((gdt::code_selector()as u64)<<32);unsafe{wrmsr(IA32_EFER,rdmsr(IA32_EFER)|EFER_SCE);wrmsr(IA32_STAR,star);wrmsr(IA32_LSTAR,aloha_syscall_entry as*const()as u64);wrmsr(IA32_FMASK,SYSCALL_MASK);}configuration_valid()}
 pub fn install_process(process:&mut Process){unsafe{ptr::write_volatile(&raw mut ALOHA_SYSCALL_KERNEL_STACK,process.kernel_stack_top());ptr::write_volatile(&raw mut ALOHA_SYSCALL_PROCESS,process as*mut Process as u64);}}
@@ -24,7 +21,6 @@ fn active_process_ptr()->*mut Process{unsafe{ptr::read_volatile(&raw const ALOHA
 pub fn configuration_valid()->bool{let expected=(0x10u64<<48)|((gdt::code_selector()as u64)<<32);unsafe{rdmsr(IA32_EFER)&EFER_SCE!=0&&rdmsr(IA32_STAR)==expected&&rdmsr(IA32_LSTAR)==aloha_syscall_entry as*const()as u64&&rdmsr(IA32_FMASK)==SYSCALL_MASK}}
 #[inline]unsafe fn rdmsr(msr:u32)->u64{let l:u32;let h:u32;asm!("rdmsr",in("ecx")msr,out("eax")l,out("edx")h,options(nostack));(h as u64)<<32|l as u64}
 #[inline]unsafe fn wrmsr(msr:u32,v:u64){asm!("wrmsr",in("ecx")msr,in("eax")(v as u32),in("edx")((v>>32)as u32),options(nostack));}
-
 global_asm!(r#"
 .section .bss
 .align 8
@@ -63,7 +59,7 @@ aloha_syscall_entry:
  je .Lsysret
  cmp al,2
  je .Liret
- mov rdi,[rip+ALOHA_SYSCALL_KERNEL_RETURN_RSP
+ mov rdi,[rip+ALOHA_SYSCALL_KERNEL_RETURN_RSP]
  jmp aloha_return_process_runner
 .Lsysret:
  mov rax,[rsp+80]
