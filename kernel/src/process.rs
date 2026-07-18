@@ -1,11 +1,7 @@
 //! Process ownership, suspended syscall state and ELF loading.
 
 use core::ptr;
-use crate::{
-    address_space::{AddressSpace, MapError, USER_REGION_START},
-    elf::{self, ElfError}, memory,
-    syscall_entry::SyscallFrame,
-};
+use crate::{address_space::{AddressSpace, MapError, USER_REGION_START}, elf::{self, ElfError}, memory, syscall_entry::SyscallFrame};
 
 pub const USER_CODE_BASE: u64 = USER_REGION_START;
 pub const USER_STACK_TOP: u64 = USER_REGION_START + 0x20_0000;
@@ -17,10 +13,8 @@ const NO_EXECUTE_FLAG: u64 = 1 << 63;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessState { Ready, Running, Sleeping, Exited, Faulted }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SuspendedCall { Sleep, Wait { child: u64 } }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoadError { Elf(ElfError), Map(MapError), IncompatiblePage, Arithmetic }
 impl From<ElfError> for LoadError { fn from(value: ElfError) -> Self { Self::Elf(value) } }
@@ -47,19 +41,12 @@ impl Process {
         unsafe { ptr::write_bytes(kernel_stack_start as *mut u8, 0, (KERNEL_STACK_PAGES * memory::FRAME_SIZE) as usize); }
         Ok(Self { pid, state: ProcessState::Ready, entry: USER_CODE_BASE, user_stack_top: USER_STACK_TOP, exit_code: 0, address_space, code_frame, kernel_stack_start, suspended: None })
     }
-
     pub fn kernel_stack_top(&self) -> u64 { self.kernel_stack_start + KERNEL_STACK_PAGES * memory::FRAME_SIZE }
-    pub fn load_bootstrap_image(&mut self, image: &[u8]) -> bool {
-        if image.is_empty() || image.len() > MAX_BOOTSTRAP_IMAGE { return false; }
-        unsafe { ptr::copy_nonoverlapping(image.as_ptr(), self.code_frame as *mut u8, image.len()); }
-        true
-    }
-
+    pub fn load_bootstrap_image(&mut self, image: &[u8]) -> bool { if image.is_empty() || image.len() > MAX_BOOTSTRAP_IMAGE { return false; } unsafe { ptr::copy_nonoverlapping(image.as_ptr(), self.code_frame as *mut u8, image.len()); } true }
     pub fn suspend_syscall(&mut self, frame: SyscallFrame, call: SuspendedCall) { self.state = ProcessState::Sleeping; self.suspended = Some((frame, call)); }
     pub fn take_suspended_syscall(&mut self) -> Option<(SyscallFrame, SuspendedCall)> { self.suspended.take() }
     #[cfg(feature="user-resume-smoke")]
     pub fn suspended_frame_mut(&mut self) -> Option<&mut SyscallFrame> { self.suspended.as_mut().map(|saved| &mut saved.0) }
-
     pub fn load_elf(&mut self, image: &[u8]) -> Result<(), LoadError> {
         let plan = elf::validate(image)?;
         for segment in plan.segments() {
@@ -84,34 +71,10 @@ impl Process {
         self.entry = plan.entry;
         Ok(())
     }
-
-    fn initialize_user_memory(&self, address: u64, source: &[u8]) -> Result<(), LoadError> {
-        let mut copied = 0usize;
-        while copied < source.len() {
-            let virtual_address = address.checked_add(copied as u64).ok_or(LoadError::Arithmetic)?;
-            let (physical, _) = self.address_space.translate(virtual_address).ok_or(LoadError::IncompatiblePage)?;
-            let count = ((memory::FRAME_SIZE - physical % memory::FRAME_SIZE) as usize).min(source.len() - copied);
-            unsafe { ptr::copy_nonoverlapping(source[copied..].as_ptr(), physical as *mut u8, count); }
-            copied += count;
-        }
-        Ok(())
-    }
-
-    fn zero_user_memory(&self, address: u64, length: u64) -> Result<(), LoadError> {
-        let mut zeroed = 0u64;
-        while zeroed < length {
-            let virtual_address = address.checked_add(zeroed).ok_or(LoadError::Arithmetic)?;
-            let (physical, _) = self.address_space.translate(virtual_address).ok_or(LoadError::IncompatiblePage)?;
-            let count = (memory::FRAME_SIZE - physical % memory::FRAME_SIZE).min(length - zeroed);
-            unsafe { ptr::write_bytes(physical as *mut u8, 0, count as usize); }
-            zeroed += count;
-        }
-        Ok(())
-    }
-
+    fn initialize_user_memory(&self, address: u64, source: &[u8]) -> Result<(), LoadError> { let mut copied = 0usize; while copied < source.len() { let virtual_address = address.checked_add(copied as u64).ok_or(LoadError::Arithmetic)?; let (physical, _) = self.address_space.translate(virtual_address).ok_or(LoadError::IncompatiblePage)?; let count = ((memory::FRAME_SIZE - physical % memory::FRAME_SIZE) as usize).min(source.len() - copied); unsafe { ptr::copy_nonoverlapping(source[copied..].as_ptr(), physical as *mut u8, count); } copied += count; } Ok(()) }
+    fn zero_user_memory(&self, address: u64, length: u64) -> Result<(), LoadError> { let mut zeroed = 0u64; while zeroed < length { let virtual_address = address.checked_add(zeroed).ok_or(LoadError::Arithmetic)?; let (physical, _) = self.address_space.translate(virtual_address).ok_or(LoadError::IncompatiblePage)?; let count = (memory::FRAME_SIZE - physical % memory::FRAME_SIZE).min(length - zeroed); unsafe { ptr::write_bytes(physical as *mut u8, 0, count as usize); } zeroed += count; } Ok(()) }
     pub fn mark_running(&mut self) { self.state = ProcessState::Running; }
-    pub fn exit(&mut self, code: i32) { self.exit_code = code; self.state = ProcessState::Exited; }
-    pub fn fault(&mut self) { self.state = ProcessState::Faulted; }
+    pub fn exit(&mut self, code: i32) { self.exit_code = code; self.state = ProcessState::Exited; self.suspended = None; }
+    pub fn fault(&mut self) { self.state = ProcessState::Faulted; self.suspended = None; }
 }
-
 impl Drop for Process { fn drop(&mut self) { unsafe { let _ = memory::deallocate_contiguous(self.kernel_stack_start, KERNEL_STACK_PAGES); } } }
