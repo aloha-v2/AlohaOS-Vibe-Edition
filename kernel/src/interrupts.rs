@@ -36,7 +36,7 @@ isr_page_fault:
 user_page_fault:
  mov rsi,[rsp];mov rdx,[rsp+8];mov rcx,cr2;mov edi,14;jmp user_fault_trampoline
 exception_trampoline: and rsp,-16;call rust_exception_handler;ud2
-user_fault_trampoline: and rsp,-16;call rust_user_fault;ud2
+user_fault_trampoline: and rsp,-16;call rust_user_fault;mov rdi,rax;mov ax,0x10;mov ds,ax;mov es,ax;mov ss,ax;mov rsp,rdi;ret
 .global irq_timer
 irq_timer:
  push rax;push rcx;push rdx;push rsi;push rdi;push r8;push r9;push r10;push r11;push rbx;push rbp;push r12;push r13;push r14;push r15
@@ -44,7 +44,7 @@ irq_timer:
  pop r15;pop r14;pop r13;pop r12;pop rbp;pop rbx;pop r11;pop r10;pop r9;pop r8;pop rdi;pop rsi;pop rdx;pop rcx;pop rax;iretq
 .global irq_keyboard
 irq_keyboard:
- push rax;push rcx;push rdx;push rsi;push rdi;push r8;push r9;push r10;push r11;push rbx;push rbp;push r12;push r13;push r14;push r15
+ push rax;push rcx;push rdx;push rsi;push rdi;push r8;push r9;push r10;push r11;push r12;push r13;push r14;push r15
  mov rbx,rsp;and rsp,-16;call rust_keyboard_interrupt;mov rsp,rbx
  pop r15;pop r14;pop r13;pop r12;pop rbp;pop rbx;pop r11;pop r10;pop r9;pop r8;pop rdi;pop rsi;pop rdx;pop rcx;pop rax;iretq
 .global user_trap_80
