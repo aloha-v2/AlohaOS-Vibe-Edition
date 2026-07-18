@@ -1,0 +1,6 @@
+use crate::fat32::{self,FileLocation};
+pub const MAX_HANDLES:usize=16;
+#[derive(Clone,Copy)]struct Handle{location:FileLocation,offset:u32,used:bool}impl Handle{const EMPTY:Self=Self{location:FileLocation::EMPTY,offset:0,used:false};}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]pub enum HandleError{NotMounted,NotFound,TooManyOpen,BadHandle}
+pub struct HandleTable{handles:[Handle;MAX_HANDLES]}
+impl HandleTable{pub const fn new()->Self{Self{handles:[Handle::EMPTY;MAX_HANDLES]}}pub fn open(&mut self,name:&[u8])->Result<usize,HandleError>{if !fat32::is_mounted(){return Err(HandleError::NotMounted)}let location=fat32::lookup(name).ok_or(HandleError::NotFound)?;let slot=self.handles.iter().position(|h|!h.used).ok_or(HandleError::TooManyOpen)?;self.handles[slot]=Handle{location,offset:0,used:true};Ok(slot)}pub fn read(&mut self,fd:usize,buffer:&mut[u8])->Result<usize,HandleError>{let h=self.handles.get_mut(fd).filter(|h|h.used).ok_or(HandleError::BadHandle)?;let n=fat32::read_at(&h.location,h.offset,buffer);h.offset=h.offset.saturating_add(n as u32);Ok(n)}pub fn close(&mut self,fd:usize)->Result<(),HandleError>{let h=self.handles.get_mut(fd).filter(|h|h.used).ok_or(HandleError::BadHandle)?;*h=Handle::EMPTY;Ok(())}}

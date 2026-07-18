@@ -18,6 +18,7 @@ user-stack-guard-smoke = []
 user-bad-pointer-smoke = []
 user-resume-smoke = []
 spawn-smoke = []
+handle-smoke = []
 
 [[bin]]
 name = "kernel"
