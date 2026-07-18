@@ -12,11 +12,12 @@
 - Sleep/wait сохраняют syscall frame и возобновляются с результатом в RAX.
 - Валидные non-SYSRET frames возвращаются через sanitised `iretq` fallback.
 - Spawn владеет ресурсами atomically: registry + address space + ELF, с полным rollback при любом сбое (PID и фреймы не текут).
-- Protection, suspended-resume и spawn-rollback suites запускаются отдельными CI matrix.
+- Per-process handle table и file syscalls `open/read/close/stat` поверх read-only FAT32.
+- Protection, suspended-resume, spawn-rollback и handle-table suites проходят в CI.
 
 ## Текущий этап: M1 Userland
 
-Owned spawn с rollback покрыт end-to-end. Следующий пакет: handle table и базовые file syscalls (`read/open/close/stat/mmap`), затем Rust user runtime и user-space shell.
+Spawn ownership и file handles покрыты end-to-end. Следующий пакет: `mmap`, затем Rust user runtime и user-space shell.
 
 Подробный статус: [TODO.md](TODO.md).
 
