@@ -1,0 +1,38 @@
+name: Suspended syscall resume smoke
+
+on:
+  push:
+    branches: [main, "brain/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  user-resume-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build suspended resume smoke kernel
+        run: make esp PROFILE=release KERNEL_FEATURES=user-resume-smoke
+      - name: Verify sleep wait results and both return paths
+        shell: bash
+        run: |
+          OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
+          set +e
+          timeout 10s qemu-system-x86_64 -machine q35 -cpu max -m 256M \
+            -drive "if=pflash,format=raw,readonly=on,file=$OVMF" \
+            -drive "format=raw,file=fat:rw:esp" \
+            -display none -monitor none -serial file:resume.log -net none -no-reboot
+          status=$?
+          set -e
+          cat resume.log
+          test "$status" -eq 124
+          grep -q "user-resume-smoke: sleep resumed through iretq with RAX=0" resume.log
+          grep -q "user-resume-smoke: wait resumed through sysretq with child status in RAX" resume.log
+          ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' resume.log

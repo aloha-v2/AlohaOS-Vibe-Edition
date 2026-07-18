@@ -13,10 +13,10 @@
 - [x] Unmapped user stack guard fault test.
 - [x] Bad syscall pointer возвращает EFAULT без kernel fault.
 - [x] CI matrix для protection negative tests.
+- [x] Suspended syscall frame resume для sleep/wait с результатом в RAX.
+- [x] IRET fallback для valid non-SYSRET frames.
 
 ### Следующий слой
-- [ ] Suspended syscall frame resume для sleep/wait с результатом в RAX.
-- [ ] IRET fallback для valid non-SYSRET frames.
 - [ ] Spawn ownership: ELF + Process + registry + rollback.
 - [ ] Handle table и `read/open/close/stat/mmap`.
 - [ ] Rust runtime и user-space shell.
@@ -25,6 +25,6 @@
 - [ ] IPC/shared memory, VM/VFS, networking/security, graphics/desktop, packages/tooling.
 
 ## Следующий пакет
-1. Suspended sleep/wait syscall resume + IRET fallback.
-2. Spawn ownership + handle table.
-3. Channels + shared memory.
+1. Spawn ownership + rollback smoke.
+2. Handle table + read/open/close/stat.
+3. mmap + Rust user runtime.

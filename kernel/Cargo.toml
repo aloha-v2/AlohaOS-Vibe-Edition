@@ -16,6 +16,7 @@ user-nx-smoke = []
 user-write-code-smoke = []
 user-stack-guard-smoke = []
 user-bad-pointer-smoke = []
+user-resume-smoke = []
 
 [[bin]]
 name = "kernel"
