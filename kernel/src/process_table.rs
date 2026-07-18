@@ -19,4 +19,4 @@ pub fn take_wake(pid:u64)->Result<bool,TableError>{let mut t=TABLE.lock();let r=
 pub fn lookup(pid:u64)->Option<ProcessRecord>{TABLE.lock().records.iter().copied().find(|r|r.pid==pid)}
 pub fn wait(parent:u64,child:u64)->Result<i32,TableError>{match wait_blocking(parent,child)?{Some(s)=>Ok(s),None=>Err(TableError::StillRunning)}}
 pub fn orphan_children(parent:u64)->usize{let mut t=TABLE.lock();let mut n=0;for r in &mut t.records{if r.pid!=0&&r.parent==parent{r.parent=0;n+=1}}n}
-#[cfg(any(feature="m0-smoke",feature="user-ud-smoke",feature="user-nx-smoke"))]pub fn reset_for_smoke(){*TABLE.lock()=ProcessTable::EMPTY;}
+#[cfg(any(feature="m0-smoke",feature="user-ud-smoke",feature="user-nx-smoke",feature="user-write-code-smoke",feature="user-stack-guard-smoke"))]pub fn reset_for_smoke(){*TABLE.lock()=ProcessTable::EMPTY;}

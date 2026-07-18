@@ -6,19 +6,17 @@
 ## M1 Userland
 
 ### Выполнено
-- [x] Ring 3, per-process memory, real syscalls и ELF execution.
-- [x] Process registry, wait/reap, sleep deadlines и PIT wake/resume.
-- [x] Exception CPL detection для #UD и #PF.
-- [x] User invalid opcode завершает только Process.
-- [x] User NX instruction fetch/page fault завершает только Process.
-- [x] Fault status/exit code публикуются в registry, runner продолжает kernel.
-- [x] QEMU negative tests для user #UD и NX fault.
+- [x] Ring 3, per-process memory, real syscalls, ELF execution и process scheduling.
+- [x] User #UD/#PF isolation и runner recovery.
+- [x] NX execution negative test.
+- [x] Write-to-code W^X fault test.
+- [x] Unmapped user stack guard fault test.
+- [x] Bad syscall pointer возвращает EFAULT без kernel fault.
+- [x] CI matrix для protection negative tests.
 
 ### Следующий слой
-- [ ] Write-to-code user fault test.
-- [ ] User stack guard overflow test.
-- [ ] Bad syscall pointer end-to-end negative test.
-- [ ] Suspended syscall frame resume для sleep/wait.
+- [ ] Suspended syscall frame resume для sleep/wait с результатом в RAX.
+- [ ] IRET fallback для valid non-SYSRET frames.
 - [ ] Spawn ownership: ELF + Process + registry + rollback.
 - [ ] Handle table и `read/open/close/stat/mmap`.
 - [ ] Rust runtime и user-space shell.
@@ -27,7 +25,6 @@
 - [ ] IPC/shared memory, VM/VFS, networking/security, graphics/desktop, packages/tooling.
 
 ## Следующий пакет
-1. Negative protection tests: W^X write, stack guard, bad pointer.
-2. Suspended syscall resume для sleep/wait.
-3. Spawn ownership + handles.
-4. Channels + shared memory.
+1. Suspended sleep/wait syscall resume + IRET fallback.
+2. Spawn ownership + handle table.
+3. Channels + shared memory.

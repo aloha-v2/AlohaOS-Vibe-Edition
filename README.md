@@ -4,16 +4,16 @@
 
 ## Готово
 
-- M0 Kernel Stable, Ring 3, syscalls, ELF execution и process scheduling foundation.
-- Exception stubs различают CPL0 и CPL3 по saved CS.
-- User invalid opcode и page fault завершают только active Process.
-- Fault status синхронизируется в process registry, дети reparent-ятся, runner получает control обратно.
-- Kernel exception path остаётся fatal и сохраняет panic diagnostics.
-- Отдельные QEMU tests проверяют user `ud2` и NX instruction-fetch fault без kernel panic.
+- M0 Kernel Stable, Ring 3, real syscalls, ELF execution и process scheduling.
+- User #UD и #PF изолируются от kernel.
+- W^X реально проверяется: запись в executable read-only code page завершает только Process.
+- Unmapped stack guard реально проверяется user write fault.
+- Bad syscall pointer возвращает EFAULT, user process продолжает работу и cleanly exits.
+- Negative protection suite запускается отдельной CI matrix.
 
 ## Текущий этап: M1 Userland
 
-Базовая crash isolation готова для #UD и #PF. Следующий пакет расширяет negative tests на write-to-code и stack guard, затем spawn ownership/rollback и handles.
+Базовая memory protection и fault isolation покрыты end-to-end. Следующий пакет: suspended syscall resume для sleep/wait, затем spawn ownership/rollback и handle table.
 
 Подробный статус: [TODO.md](TODO.md).
 
