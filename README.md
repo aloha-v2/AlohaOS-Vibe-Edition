@@ -11,11 +11,12 @@
 - Bad syscall pointer возвращает EFAULT, user process продолжает работу и cleanly exits.
 - Sleep/wait сохраняют syscall frame и возобновляются с результатом в RAX.
 - Валидные non-SYSRET frames возвращаются через sanitised `iretq` fallback.
-- Protection и suspended-resume suites запускаются отдельными CI matrix.
+- Per-process handle table и file syscalls `open/read/close/stat` поверх read-only FAT32.
+- Protection, suspended-resume и handle-table suites запускаются отдельными CI matrix.
 
 ## Текущий этап: M1 Userland
 
-Syscall suspension/resume и оба безопасных пути возврата покрыты end-to-end. Следующий пакет: spawn ownership/rollback, затем handle table и базовые file syscalls.
+Handle table и базовые file syscalls покрыты end-to-end через реальный dispatch против FAT32-тома. Следующий пакет: `mmap`, затем Rust user runtime и user-space shell.
 
 Подробный статус: [TODO.md](TODO.md).
 
