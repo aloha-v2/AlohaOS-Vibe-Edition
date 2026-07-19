@@ -22,8 +22,8 @@ jobs:
         run: |
           cargo build --release --target x86_64-unknown-uefi -p alohaboot
           cargo build --release --target x86_64-unknown-none -p kernel --features user-shell-smoke
-          cargo rustc --release --target x86_64-unknown-none -p aloha-test-child -- -C link-arg=user/test-child/linker.ld
-          cargo rustc --release --target x86_64-unknown-none -p aloha-test-shell -- -C link-arg=user/test-shell/linker.ld
+          cargo rustc --release --target x86_64-unknown-none -p aloha-test-child -- -C code-model=large -C link-arg=user/test-child/linker.ld
+          cargo rustc --release --target x86_64-unknown-none -p aloha-test-shell -- -C code-model=large -C link-arg=user/test-shell/linker.ld
           mkdir -p esp/EFI/BOOT esp/alohaos disk
           cp target/x86_64-unknown-uefi/release/alohaboot.efi esp/EFI/BOOT/BOOTX64.EFI
           cp target/x86_64-unknown-none/release/kernel esp/alohaos/kernel.elf
@@ -45,7 +45,7 @@ jobs:
           set -e
           cat user-shell.log
           test "$status" -eq 124
-          grep -q "user-shell-smoke: shell spawn failed" user-shell.log && exit 1 || true
+          ! grep -q "user-shell-smoke: shell spawn failed" user-shell.log
           grep -q "user-shell-smoke: real shell spawn/wait exit=37" user-shell.log
           grep -q "child: hello from a real user ELF" user-shell.log
           ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' user-shell.log
