@@ -110,6 +110,47 @@ impl AddressSpace {
         Ok(page)
     }
 
+    /// Map a contiguous, zero-filled user range. Leaf frames are rolled back if
+    /// any page fails, so callers never observe a partially successful mmap.
+    pub fn map_zeroed_user_range(
+        &mut self,
+        start: u64,
+        page_count: u64,
+        writable: bool,
+        executable: bool,
+    ) -> Result<(), MapError> {
+        let byte_length = page_count
+            .checked_mul(memory::FRAME_SIZE)
+            .ok_or(MapError::InvalidAddress)?;
+        let end = start
+            .checked_add(byte_length)
+            .ok_or(MapError::InvalidAddress)?;
+        if page_count == 0
+            || start % memory::FRAME_SIZE != 0
+            || start < USER_REGION_START
+            || end > USER_REGION_END
+        {
+            return Err(MapError::InvalidAddress);
+        }
+        for index in 0..page_count {
+            let address = start + index * memory::FRAME_SIZE;
+            if self.translate(address).is_some() {
+                return Err(MapError::AlreadyMapped);
+            }
+        }
+
+        let mut mapped = 0;
+        while mapped < page_count {
+            let address = start + mapped * memory::FRAME_SIZE;
+            if let Err(error) = self.map_zeroed_user_page(address, writable, executable) {
+                self.rollback_leaf_range(start, mapped);
+                return Err(error);
+            }
+            mapped += 1;
+        }
+        Ok(())
+    }
+
     pub fn translate(&self, virtual_address: u64) -> Option<(u64, u64)> {
         let indices = indices(virtual_address);
         let mut table_frame = self.root;
@@ -260,6 +301,36 @@ impl AddressSpace {
         Ok(())
     }
 
+    fn rollback_leaf_range(&mut self, start: u64, page_count: u64) {
+        for index in 0..page_count {
+            let address = start + index * memory::FRAME_SIZE;
+            if let Some(frame) = self.unmap_user_page(address) {
+                if self.untrack(frame) {
+                    unsafe { let _ = memory::deallocate_frame(frame); }
+                }
+            }
+        }
+    }
+
+    fn unmap_user_page(&mut self, virtual_address: u64) -> Option<u64> {
+        let indices = indices(virtual_address);
+        let mut table_frame = self.root;
+        for index in &indices[..3] {
+            let entry = unsafe { (*(table_frame as *const PageTable)).entries[*index] };
+            if entry & PRESENT == 0 {
+                return None;
+            }
+            table_frame = entry & ADDRESS_MASK;
+        }
+        let slot = unsafe { &mut (*(table_frame as *mut PageTable)).entries[indices[3]] };
+        if *slot & PRESENT == 0 {
+            return None;
+        }
+        let frame = *slot & ADDRESS_MASK;
+        *slot = 0;
+        Some(frame)
+    }
+
     fn track(&mut self, frame: u64) -> Result<(), MapError> {
         if self.owned_count == MAX_OWNED_FRAMES {
             return Err(MapError::OwnershipLimit);
@@ -267,6 +338,21 @@ impl AddressSpace {
         self.owned[self.owned_count] = frame;
         self.owned_count += 1;
         Ok(())
+    }
+
+    fn untrack(&mut self, frame: u64) -> bool {
+        let Some(index) = self.owned[..self.owned_count]
+            .iter()
+            .position(|owned| *owned == frame)
+        else {
+            return false;
+        };
+        for current in index..self.owned_count - 1 {
+            self.owned[current] = self.owned[current + 1];
+        }
+        self.owned_count -= 1;
+        self.owned[self.owned_count] = 0;
+        true
     }
 
     fn untrack_last(&mut self, frame: u64) {
