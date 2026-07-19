@@ -7,7 +7,8 @@ size=64*1024*1024; sectors=size//512; reserved=32; fat_count=1; spf=1024; spc=1;
 boot=bytearray(512); boot[0:3]=b"\xeb\x58\x90"; boot[3:11]=b"ALOHAOS "; struct.pack_into("<H",boot,11,512); boot[13]=spc; struct.pack_into("<H",boot,14,reserved); boot[16]=fat_count; struct.pack_into("<I",boot,32,sectors); struct.pack_into("<I",boot,36,spf); struct.pack_into("<I",boot,44,2); struct.pack_into("<H",boot,48,1); struct.pack_into("<H",boot,50,6); boot[64]=0x80; boot[66]=0x29; struct.pack_into("<I",boot,67,0xA10A05); boot[71:82]=b"ALOHAOSDISK"; boot[82:90]=b"FAT32   "; boot[510:512]=b"\x55\xaa"
 fsinfo=bytearray(512); struct.pack_into("<I",fsinfo,0,0x41615252); struct.pack_into("<I",fsinfo,484,0x61417272); struct.pack_into("<I",fsinfo,488,0xffffffff); struct.pack_into("<I",fsinfo,492,4); struct.pack_into("<I",fsinfo,508,0xaa550000)
 fat=bytearray(spf*512)
-for cluster,value in ((0,0x0ffffff8),(1,0x0fffffff),(2,0x0fffffff): struct.pack_into("<I",fat,cluster*4,value)
+for cluster,value in ((0,0x0ffffff8),(1,0x0fffffff),(2,0x0fffffff)):
+    struct.pack_into("<I",fat,cluster*4,value)
 root=bytearray(512); next_cluster=3; placements=[]
 for index,(name,data) in enumerate(files):
     count=max(1,(len(data)+511)//512); first=next_cluster
