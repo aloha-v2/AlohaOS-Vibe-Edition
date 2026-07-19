@@ -19,6 +19,7 @@ user-bad-pointer-smoke = []
 user-resume-smoke = []
 spawn-smoke = []
 handle-smoke = []
+user-shell-smoke = []
 
 [[bin]]
 name = "kernel"
