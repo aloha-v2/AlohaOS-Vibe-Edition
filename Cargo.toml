@@ -9,3 +9,14 @@ panic = "abort"
 panic = "abort"
 opt-level = "z"
 lto = true
+
+# User fixtures are linked at the high-half user base and compiled with the
+# large code model. Keep their dependencies out of workspace LTO so LLVM does
+# not reject mixed code-model module flags.
+[profile.release.package.aloha-test-child]
+lto = false
+codegen-units = 1
+
+[profile.release.package.aloha-test-shell]
+lto = false
+codegen-units = 1
