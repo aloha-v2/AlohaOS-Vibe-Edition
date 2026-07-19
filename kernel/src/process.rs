@@ -5,9 +5,11 @@ use crate::{address_space::{AddressSpace, MapError, USER_REGION_START}, elf::{se
 
 pub const USER_CODE_BASE: u64 = USER_REGION_START;
 pub const USER_STACK_TOP: u64 = USER_REGION_START + 0x20_0000;
+pub const USER_MMAP_BASE: u64 = USER_REGION_START + 0x40_0000;
 const USER_STACK_PAGES: u64 = 4;
 const KERNEL_STACK_PAGES: u64 = 8;
 const MAX_BOOTSTRAP_IMAGE: usize = memory::FRAME_SIZE as usize;
+const MAX_MMAP_LENGTH: u64 = 128 * 1024;
 const WRITABLE_FLAG: u64 = 1 << 1;
 const NO_EXECUTE_FLAG: u64 = 1 << 63;
 
@@ -30,6 +32,7 @@ pub struct Process {
     pub handle_table: HandleTable,
     code_frame: u64,
     kernel_stack_start: u64,
+    mmap_next: u64,
     suspended: Option<(SyscallFrame, SuspendedCall)>,
 }
 
@@ -40,7 +43,7 @@ impl Process {
         for page in 1..=USER_STACK_PAGES { address_space.map_zeroed_user_page(USER_STACK_TOP - page * memory::FRAME_SIZE, true, false)?; }
         let kernel_stack_start = memory::allocate_contiguous(KERNEL_STACK_PAGES).ok_or(MapError::OutOfFrames)?;
         unsafe { ptr::write_bytes(kernel_stack_start as *mut u8, 0, (KERNEL_STACK_PAGES * memory::FRAME_SIZE) as usize); }
-        Ok(Self { pid, state: ProcessState::Ready, entry: USER_CODE_BASE, user_stack_top: USER_STACK_TOP, exit_code: 0, address_space, handle_table: HandleTable::new(), code_frame, kernel_stack_start, suspended: None })
+        Ok(Self { pid, state: ProcessState::Ready, entry: USER_CODE_BASE, user_stack_top: USER_STACK_TOP, exit_code: 0, address_space, handle_table: HandleTable::new(), code_frame, kernel_stack_start, mmap_next: USER_MMAP_BASE, suspended: None })
     }
     pub fn kernel_stack_top(&self) -> u64 { self.kernel_stack_start + KERNEL_STACK_PAGES * memory::FRAME_SIZE }
     pub fn load_bootstrap_image(&mut self, image: &[u8]) -> bool { if image.is_empty() || image.len() > MAX_BOOTSTRAP_IMAGE { return false; } unsafe { ptr::copy_nonoverlapping(image.as_ptr(), self.code_frame as *mut u8, image.len()); } true }
@@ -48,6 +51,21 @@ impl Process {
     pub fn take_suspended_syscall(&mut self) -> Option<(SyscallFrame, SuspendedCall)> { self.suspended.take() }
     #[cfg(feature="user-resume-smoke")]
     pub fn suspended_frame_mut(&mut self) -> Option<&mut SyscallFrame> { self.suspended.as_mut().map(|saved| &mut saved.0) }
+    pub fn map_anonymous(&mut self, length: u64, writable: bool, executable: bool) -> Result<u64, MapError> {
+        if length == 0 || length > MAX_MMAP_LENGTH {
+            return Err(MapError::InvalidAddress);
+        }
+        let rounded = length
+            .checked_add(memory::FRAME_SIZE - 1)
+            .ok_or(MapError::InvalidAddress)?
+            & !(memory::FRAME_SIZE - 1);
+        let page_count = rounded / memory::FRAME_SIZE;
+        let start = self.mmap_next;
+        let next = start.checked_add(rounded).ok_or(MapError::InvalidAddress)?;
+        self.address_space.map_zeroed_user_range(start, page_count, writable, executable)?;
+        self.mmap_next = next;
+        Ok(start)
+    }
     pub fn load_elf(&mut self, image: &[u8]) -> Result<(), LoadError> {
         let plan = elf::validate(image)?;
         for segment in plan.segments() {
