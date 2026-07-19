@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  USER_RUSTFLAGS: -C relocation-model=static -C no-redzone=yes -C force-frame-pointers=yes -C code-model=large
+
 jobs:
   user-shell-smoke:
     runs-on: ubuntu-latest
@@ -22,8 +25,8 @@ jobs:
         run: |
           cargo build --release --target x86_64-unknown-uefi -p alohaboot
           cargo build --release --target x86_64-unknown-none -p kernel --features user-shell-smoke
-          cargo rustc --release --target x86_64-unknown-none -p aloha-test-child -- -C code-model=large -C link-arg=user/test-child/linker.ld
-          cargo rustc --release --target x86_64-unknown-none -p aloha-test-shell -- -C code-model=large -C link-arg=user/test-shell/linker.ld
+          RUSTFLAGS="$USER_RUSTFLAGS" cargo rustc --release --target x86_64-unknown-none -p aloha-test-child -- -C link-arg=user/test-child/linker.ld
+          RUSTFLAGS="$USER_RUSTFLAGS" cargo rustc --release --target x86_64-unknown-none -p aloha-test-shell -- -C link-arg=user/test-shell/linker.ld
           mkdir -p esp/EFI/BOOT esp/alohaos disk
           cp target/x86_64-unknown-uefi/release/alohaboot.efi esp/EFI/BOOT/BOOTX64.EFI
           cp target/x86_64-unknown-none/release/kernel esp/alohaos/kernel.elf
