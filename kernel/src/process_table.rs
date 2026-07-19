@@ -9,9 +9,6 @@ fn validate_parent(t:&ProcessTable,p:Option<u64>)->Result<(),TableError>{if let 
 fn find_mut(t:&mut ProcessTable,pid:u64)->Result<&mut ProcessRecord,TableError>{t.records.iter_mut().find(|r|r.pid==pid).ok_or(TableError::NoSuchProcess)}
 pub fn spawn(parent:Option<u64>)->Result<u64,TableError>{let mut t=TABLE.lock();validate_parent(&t,parent)?;let s=t.empty_slot()?;let pid=t.allocate_pid();t.records[s]=new_record(pid,parent);Ok(pid)}
 pub fn register(pid:u64,parent:Option<u64>)->Result<(),TableError>{if pid==0{return Err(TableError::NoSuchProcess)}let mut t=TABLE.lock();if t.records.iter().any(|r|r.pid==pid){return Err(TableError::AlreadyExists)}validate_parent(&t,parent)?;let s=t.empty_slot()?;t.records[s]=new_record(pid,parent);if t.next_pid<=pid{t.next_pid=pid.saturating_add(1).max(1)}Ok(())}
-/// Fully release a record's slot. Used to roll back a reserved PID when a later
-/// spawn stage fails; the freed slot and the record's children links are cleared
-/// so nothing observes the aborted process.
 pub fn remove(pid:u64)->Result<(),TableError>{if pid==0{return Err(TableError::NoSuchProcess)}let mut t=TABLE.lock();let slot=t.records.iter().position(|r|r.pid==pid).ok_or(TableError::NoSuchProcess)?;t.records[slot]=ProcessRecord::EMPTY;for r in &mut t.records{if r.pid!=0&&r.parent==pid{r.parent=0}}Ok(())}
 pub fn set_state(pid:u64,state:ProcessState)->Result<(),TableError>{let mut t=TABLE.lock();find_mut(&mut t,pid)?.state=state;Ok(())}
 pub fn sleep_until(pid:u64,now:u64,deadline:u64)->Result<(),TableError>{if deadline<=now{return Err(TableError::InvalidDeadline)}let mut t=TABLE.lock();let r=find_mut(&mut t,pid)?;r.state=ProcessState::Sleeping;r.wake_tick=deadline;r.wake_pending=false;Ok(())}
@@ -23,4 +20,4 @@ pub fn take_wake(pid:u64)->Result<bool,TableError>{let mut t=TABLE.lock();let r=
 pub fn lookup(pid:u64)->Option<ProcessRecord>{TABLE.lock().records.iter().copied().find(|r|r.pid==pid)}
 pub fn wait(parent:u64,child:u64)->Result<i32,TableError>{match wait_blocking(parent,child)?{Some(s)=>Ok(s),None=>Err(TableError::StillRunning)}}
 pub fn orphan_children(parent:u64)->usize{let mut t=TABLE.lock();let mut n=0;for r in &mut t.records{if r.pid!=0&&r.parent==parent{r.parent=0;n+=1}}n}
-#[cfg(any(feature="m0-smoke",feature="user-ud-smoke",feature="user-nx-smoke",feature="user-write-code-smoke",feature="user-stack-guard-smoke",feature="user-bad-pointer-smoke",feature="user-resume-smoke",feature="spawn-smoke"))]pub fn reset_for_smoke(){*TABLE.lock()=ProcessTable::EMPTY;}
+#[cfg(any(feature="m0-smoke",feature="user-ud-smoke",feature="user-nx-smoke",feature="user-write-code-smoke",feature="user-stack-guard-smoke",feature="user-bad-pointer-smoke",feature="user-resume-smoke",feature="spawn-smoke",feature="user-shell-smoke"))]pub fn reset_for_smoke(){*TABLE.lock()=ProcessTable::EMPTY;}
