@@ -1,0 +1,11 @@
+[package]
+name = "aloha-test-shell"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aloha-user = { path = "../runtime" }
+
+[[bin]]
+name = "aloha-test-shell"
+path = "src/main.rs"

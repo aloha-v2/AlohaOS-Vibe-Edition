@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["boot", "kernel", "common", "user/runtime", "user/shell"]
+members = ["boot", "kernel", "common", "user/runtime", "user/shell", "user/test-child", "user/test-shell"]
 
 [profile.dev]
 panic = "abort"

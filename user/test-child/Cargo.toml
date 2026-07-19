@@ -1,0 +1,11 @@
+[package]
+name = "aloha-test-child"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aloha-user = { path = "../runtime" }
+
+[[bin]]
+name = "aloha-test-child"
+path = "src/main.rs"
