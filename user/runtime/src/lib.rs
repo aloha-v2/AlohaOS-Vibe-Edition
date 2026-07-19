@@ -15,6 +15,7 @@ const SYS_READ: u64 = 7;
 const SYS_CLOSE: u64 = 8;
 const SYS_STAT: u64 = 9;
 const SYS_MMAP: u64 = 10;
+const SYS_SPAWN: u64 = 11;
 
 pub const PROT_READ: u64 = 1;
 pub const PROT_WRITE: u64 = 2;
@@ -130,6 +131,10 @@ pub fn stat(path: &[u8]) -> Result<u64> {
 pub fn mmap(length: usize, protection: u64) -> Result<*mut u8> {
     call(SYS_MMAP, [0, length as u64, protection, MAP_ANONYMOUS, 0, 0])
         .map(|address| address as *mut u8)
+}
+
+pub fn spawn(path: &[u8]) -> Result<u64> {
+    call(SYS_SPAWN, [path.as_ptr() as u64, path.len() as u64, 0, 0, 0, 0])
 }
 
 /// Define the freestanding `_start` symbol and exit with the application's code.
