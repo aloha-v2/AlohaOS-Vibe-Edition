@@ -1,0 +1,51 @@
+name: User shell ELF integration
+
+on:
+  push:
+    branches: [main, "brain/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  user-shell-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Build boot, kernel and real user ELFs
+        run: |
+          cargo build --release --target x86_64-unknown-uefi -p alohaboot
+          cargo build --release --target x86_64-unknown-none -p kernel --features user-shell-smoke
+          cargo rustc --release --target x86_64-unknown-none -p aloha-test-child -- -C link-arg=user/test-child/linker.ld
+          cargo rustc --release --target x86_64-unknown-none -p aloha-test-shell -- -C link-arg=user/test-shell/linker.ld
+          mkdir -p esp/EFI/BOOT esp/alohaos disk
+          cp target/x86_64-unknown-uefi/release/alohaboot.efi esp/EFI/BOOT/BOOTX64.EFI
+          cp target/x86_64-unknown-none/release/kernel esp/alohaos/kernel.elf
+          python3 scripts/create-fat32.py disk/aloha-fat32.img \
+            CHILD.ELF=target/x86_64-unknown-none/release/aloha-test-child \
+            SHELL.ELF=target/x86_64-unknown-none/release/aloha-test-shell
+      - name: Verify shell spawn, wait and child exit code
+        shell: bash
+        run: |
+          OVMF=$(find /usr/share/OVMF -type f \( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE_2M.fd' \) | head -n 1)
+          set +e
+          timeout 15s qemu-system-x86_64 -machine q35 -cpu max -m 256M \
+            -drive "if=pflash,format=raw,readonly=on,file=$OVMF" \
+            -drive "format=raw,file=fat:rw:esp" \
+            -drive "if=none,id=aloha-disk,format=raw,file=disk/aloha-fat32.img" \
+            -device "virtio-blk-pci,drive=aloha-disk,disable-modern=on" \
+            -display none -monitor none -serial file:user-shell.log -net none -no-reboot
+          status=$?
+          set -e
+          cat user-shell.log
+          test "$status" -eq 124
+          grep -q "user-shell-smoke: shell spawn failed" user-shell.log && exit 1 || true
+          grep -q "user-shell-smoke: real shell spawn/wait exit=37" user-shell.log
+          grep -q "child: hello from a real user ELF" user-shell.log
+          ! grep -Eiq '\[ERROR\]|DOUBLE FAULT|kernel panic' user-shell.log
