@@ -19,16 +19,17 @@
 - [x] Per-process handle table и file syscalls `open/read/close/stat` поверх read-only FAT32 (+ handle smoke в CI).
 - [x] Anonymous `mmap`: bounded page allocation, zero-fill, NX/W^X, overflow/overlap checks и partial-map rollback.
 - [x] Rust `no_std` user runtime `aloha-user`: syscall wrappers, errno mapping, `entry!` и `panic_handler!`.
+- [x] Shell `stat` и synchronous `spawn <file>`: FAT32 read, ELF validation, Ring 3 run и exit code.
 
 ### Сейчас делаем
-- [ ] `SYS_SPAWN`: запуск ELF из FAT32 из user-space с атомарным rollback.
-- [ ] User-space shell: command line, `ls`, `cat`, `spawn`, `wait`, exit status.
+- [ ] `SYS_SPAWN`: supervisor-managed child ownership, user path validation и atomic rollback.
+- [ ] User-space shell: вынести shell execution из kernel и добавить `ls`, `cat`, `spawn`, `wait` через runtime.
 - [ ] User runtime integration test: собрать маленький user ELF и прогнать его через QEMU.
 
 ## M2+
 - [ ] IPC/shared memory, VM/VFS, networking/security, graphics/desktop, packages/tooling.
 
 ## Следующий пакет
-1. `SYS_SPAWN` поверх существующего `spawn_elf` и read-only FAT32.
-2. User-space shell, который использует `open/read/close`, `spawn` и `wait`.
+1. `SYS_SPAWN` + supervisor child table, включая wait/exit ownership.
+2. User-space shell на `aloha-user`.
 3. QEMU end-to-end test: shell запускает user ELF и проверяет exit code.
