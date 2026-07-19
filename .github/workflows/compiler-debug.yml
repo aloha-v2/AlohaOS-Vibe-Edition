@@ -1,0 +1,43 @@
+name: Compiler diagnostics
+
+on:
+  push:
+    branches: ["brain/m1-shell-spawn"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install targets
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rustup show
+          rustc --version --verbose
+          cargo --version --verbose
+          rustup target add x86_64-unknown-uefi x86_64-unknown-none
+      - name: Verbose bootloader build
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build -vv --release --target x86_64-unknown-uefi -p alohaboot 2>&1 | tee bootloader-build.log
+      - name: Verbose kernel build
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build -vv --release --target x86_64-unknown-none -p kernel 2>&1 | tee kernel-build.log
+      - name: Upload compiler logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiler-diagnostics
+          path: |
+            bootloader-build.log
+            kernel-build.log
+          if-no-files-found: ignore

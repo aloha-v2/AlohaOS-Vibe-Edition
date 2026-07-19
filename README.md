@@ -15,13 +15,14 @@
 - Per-process handle table и file syscalls `open/read/close/stat` поверх read-only FAT32.
 - Anonymous user `mmap`: zero-filled pages, bounded allocation, NX/W^X validation и rollback.
 - Rust `no_std` user runtime `aloha-user` с typed wrappers для ABI v1, errno decoding и entry/panic macros.
+- Kernel shell commands `ls`, `cat`, `stat` и synchronous ELF `spawn` с выводом exit code.
 - Protection, suspended-resume, spawn-rollback, handle-table и mmap suites проходят в CI.
 
 ## Текущий этап: M1 Userland
 
-Базовый memory layer и runtime готовы. Сейчас собираем настоящий user-space shell: запуск ELF из FAT32 через spawn, аргументы командной строки, `ls/cat` и корректный wait/exit flow.
+Memory layer, runtime и первый shell execution flow готовы. `spawn <file>` читает ELF из read-only FAT32, запускает его через существующий Ring 3 runner и печатает exit code. Следующий шаг: превратить synchronous shell spawn в настоящий `SYS_SPAWN` + supervisor-managed child lifecycle, затем добавить end-to-end QEMU coverage.
 
-Подробный статус и следующий порядок работ: [TODO.md](TODO.md).
+Подробный статус: [TODO.md](TODO.md).
 
 ## Сборка user runtime
 
